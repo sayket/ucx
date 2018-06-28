@@ -14,9 +14,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define UCP_AM_ID_BITS 15
-#define UCP_AM_ID_MAX  UCS_BIT(UCP_AM_ID_BITS)
-
 /**
  * @ingroup UCP_CONTEXT
  * @brief UCP receive information descriptor
@@ -93,7 +90,7 @@ typedef struct ucp_ep                    *ucp_ep_h;
  * @param [in]  arg     User-defined argument.
  * @param [in]  data    Points to the received data. This data may
  *                      persist after the callback returns and need
- *                      to be freed with @ref ucp_am_data_free
+ *                      to be freed with @ref ucp_am_data_release
  * @param [in]  length  Length of data.
  * @param [in]  flags   If this flag is set to UCP_CB_PARAM_FLAG_DATA,
  *                      the callback can return UCS_INPROGRESS and
@@ -106,7 +103,7 @@ typedef struct ucp_ep                    *ucp_ep_h;
  *                        is returned, data will persist after the
  *                        callback has returned. To free the memory,
  *                        a pointer to the data must be passed into
- *                        @ref ucp_am_data_free
+ *                        @ref ucp_am_data_release
  *
  * @note This callback could be set and released
  *       by @ref ucp_worker_set_am_handler function.
