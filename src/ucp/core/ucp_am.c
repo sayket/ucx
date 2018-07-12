@@ -378,6 +378,9 @@ ucp_am_long_handler(void *am_arg, void *am_data, size_t am_length,
     ucp_ep_ext_proto_t *ep_ext = ucp_ep_ext_proto(ep);
     ucp_am_unfinished_t *parent_am;
     uint16_t am_id;
+    ucp_recv_desc_t *all_data;
+    size_t left;
+    ucp_am_unfinished_t *unfinished;
 
     if(worker->am_cbs[long_hdr->am_id].cb == NULL){
         ucs_warn("UCP Active Message was received with id : %u, but there"
@@ -418,20 +421,19 @@ ucp_am_long_handler(void *am_arg, void *am_data, size_t am_length,
     /* If I am first, I make the buffer for everyone to go into,
      * copy myself in, and put myself on the list so people can find me
      */
-    ucp_recv_desc_t *all_data = ucs_malloc(long_hdr->total_size
-                                           + sizeof(ucp_recv_desc_t),
-                                           "ucp recv desc for long AM");
+    all_data = ucs_malloc(long_hdr->total_size
+                          + sizeof(ucp_recv_desc_t),
+                          "ucp recv desc for long AM");
 
     all_data->flags |= UCP_RECV_DESC_FLAG_MALLOC;
 
-    size_t left = long_hdr->total_size - (am_length -
-                                          sizeof(ucp_am_long_hdr_t));
-    /* We know this one goes first */
+    left = long_hdr->total_size - (am_length -
+                                   sizeof(ucp_am_long_hdr_t));
+    
     memcpy(UCS_PTR_BYTE_OFFSET(all_data + 1, long_hdr->offset),
            long_hdr + 1, am_length - sizeof(ucp_am_long_hdr_t));
 
     /* Can't use a desc for this because of the buffer */
-    ucp_am_unfinished_t *unfinished;
 
     unfinished              = ucs_malloc(sizeof(ucp_am_unfinished_t),
                                          "unfinished UCP AM");
