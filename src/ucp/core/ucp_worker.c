@@ -1207,8 +1207,8 @@ ucs_status_t ucp_worker_create(ucp_context_h context,
 
     if (context->config.features & UCP_FEATURE_AM){
         worker->am_cbs            = ucs_calloc(AM_BLOCK, 
-                                               sizeof(ucp_worker_am_entry_t)
-                                               ,"ucp am callback array");
+                                               sizeof(ucp_worker_am_entry_t),
+                                               "ucp am callback array");
         worker->am_cb_array_len   = AM_BLOCK;
     }
     name_length = ucs_min(UCP_WORKER_NAME_MAX,

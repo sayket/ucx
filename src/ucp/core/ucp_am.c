@@ -28,7 +28,7 @@ void ucp_am_ep_cleanup(ucp_ep_h ep)
 {
     ucp_ep_ext_proto_t *ep_ext = ucp_ep_ext_proto(ep);
 
-    if(ep->worker->context->config.features & UCP_FEATURE_AM) {
+    if (ep->worker->context->config.features & UCP_FEATURE_AM) {
         ucs_list_del(&ep_ext->am.started_ams);
     }
 }
@@ -96,12 +96,12 @@ size_t bcopy_pack_args_first(void *dest, void *arg){
     size_t length;
 
     length = ucp_ep_get_max_bcopy(req->send.ep, req->send.lane) -
-                                  sizeof(ucp_am_long_hdr_t);
+                                  sizeof(*hdr);
     hdr->total_size = req->send.length;
     hdr->am_id      = req->send.am.am_id;
-    hdr->msg_id         = req->send.tag.message_id;
-    hdr->ep             = ucp_request_get_dest_ep_ptr(req);
-    hdr->offset         = req->send.state.dt.offset;
+    hdr->msg_id     = req->send.tag.message_id;
+    hdr->ep         = ucp_request_get_dest_ep_ptr(req);
+    hdr->offset     = req->send.state.dt.offset;
     return sizeof(*hdr) + ucp_dt_pack(req->send.ep->worker, 
                                       req->send.datatype, 
                                       UCT_MD_MEM_TYPE_HOST,
@@ -119,9 +119,9 @@ size_t bcopy_pack_args_mid(void *dest, void *arg)
                      sizeof(*hdr),
                      req->send.length - req->send.state.dt.offset);
 
-    hdr->msg_id         = req->send.tag.message_id;
-    hdr->offset         = req->send.state.dt.offset;
-    hdr->ep             = ucp_request_get_dest_ep_ptr(req);
+    hdr->msg_id     = req->send.am.message_id;
+    hdr->offset     = req->send.state.dt.offset;
+    hdr->ep         = ucp_request_get_dest_ep_ptr(req);
     hdr->am_id      = req->send.am.am_id;
     hdr->total_size = req->send.length;
     return sizeof(*hdr) + ucp_dt_pack(req->send.ep->worker,
@@ -157,7 +157,7 @@ static ucs_status_t ucp_am_contig_short(uct_pending_req_t *self)
                                              req->send.buffer, 
                                              req->send.length);
   
-    if (ucs_likely(status == UCS_OK)){
+    if (ucs_likely(status == UCS_OK)) {
         ucp_request_complete_send(req, UCS_OK);
     }
     return status;
@@ -169,7 +169,7 @@ static ucs_status_t ucp_am_bcopy_single(uct_pending_req_t *self)
     ucp_request_t *req = ucs_container_of(self, ucp_request_t, send.uct);
     status = ucp_do_am_bcopy_single(self, UCP_AM_ID_SINGLE, 
                                     bcopy_pack_args_single);
-    if (status == UCS_OK){
+    if (status == UCS_OK) {
         ucp_request_send_generic_dt_finish(req);
         ucp_request_complete_send(req, UCS_OK);
     }
@@ -212,9 +212,9 @@ static ucs_status_t ucp_am_zcopy_multi(uct_pending_req_t *self)
     ucp_request_t *req = ucs_container_of(self, ucp_request_t, send.uct);
     ucp_am_long_hdr_t hdr;
 
-    hdr.ep             = ucp_request_get_dest_ep_ptr(req);
-    hdr.msg_id         = req->send.tag.message_id;
-    hdr.offset         = req->send.state.dt.offset;
+    hdr.ep         = ucp_request_get_dest_ep_ptr(req);
+    hdr.msg_id     = req->send.tag.message_id;
+    hdr.offset     = req->send.state.dt.offset;
     hdr.am_id      = req->send.am.am_id;
     hdr.total_size = req->send.length;
     return ucp_do_am_zcopy_multi(self, UCP_AM_ID_MULTI, UCP_AM_ID_MULTI,
@@ -254,16 +254,16 @@ ucp_am_send_req(ucp_request_t *req, size_t count,
                                                  zcopy_thresh, SIZE_MAX,
                                                  count, msg_config,
                                                  proto);
-    if(status != UCS_OK){
+    if (status != UCS_OK) {
        return UCS_STATUS_PTR(status);
     }
 
-    /*Start the request.
+    /* Start the request.
      * If it is completed immediately, release the request and return the status.
      * Otherwise, return the request.
      */
     status = ucp_request_send(req);
-    if(req->flags & UCP_REQUEST_FLAG_COMPLETED){
+    if (req->flags & UCP_REQUEST_FLAG_COMPLETED) {
         ucs_trace_req("releasing send request %p, returning status %s", req,
                       ucs_status_string(status));
         ucp_request_put(req);
@@ -286,23 +286,23 @@ ucs_status_ptr_t ucp_am_send_nb(ucp_ep_h ep, uint16_t id,
     size_t length;
     ucp_request_t *req;
 
-    UCP_THREAD_CS_ENTER_CONDITIONAL(&ep->worker->mt_lock);
-    
-    if(ucs_unlikely(flags != 0)){
+    if (ucs_unlikely(flags != 0)) {
         ret = UCS_STATUS_PTR(UCS_ERR_NOT_IMPLEMENTED);
-        goto out;
+        return ret;
     }
+
+    UCP_THREAD_CS_ENTER_CONDITIONAL(&ep->worker->mt_lock);
 
     status = ucp_ep_resolve_dest_ep_ptr(ep, ep->am_lane);
     if (status != UCS_OK) {
         ret = UCS_STATUS_PTR(status);
         goto out;
     }
-    if(ucs_likely(UCP_DT_IS_CONTIG(datatype))){
+    if (ucs_likely(UCP_DT_IS_CONTIG(datatype))) {
         length = ucp_contig_dt_length(datatype, count);
-        if(ucs_likely((ssize_t)length <= ucp_ep_config(ep)->am.max_short)){
+        if (ucs_likely((ssize_t)length <= ucp_ep_config(ep)->am.max_short)) {
             status = ucp_am_send_short(ep, id, payload, length);
-            if(ucs_likely(status != UCS_ERR_NO_RESOURCE)){
+            if (ucs_likely(status != UCS_ERR_NO_RESOURCE)) {
                 UCP_EP_STAT_TAG_OP(ep, EAGER);
                 ret = UCS_STATUS_PTR(status);
                 goto out;
@@ -310,7 +310,7 @@ ucs_status_ptr_t ucp_am_send_nb(ucp_ep_h ep, uint16_t id,
         }
     }
     req = ucp_request_get(ep->worker);
-    if(ucs_unlikely(req == NULL)){
+    if (ucs_unlikely(req == NULL)) {
         ret = UCS_STATUS_PTR(UCS_ERR_NO_MEMORY);
         goto out;
     }
@@ -336,13 +336,13 @@ ucp_am_handler(void *am_arg, void *am_data, size_t am_length,
     uint16_t recv_flags = 0;
     uint16_t am_id      = hdr->am_id;
     
-    if(worker->am_cbs[hdr->am_id].cb == NULL){
+    if (worker->am_cbs[hdr->am_id].cb == NULL) {
         ucs_warn("UCP Active Message was received with id : %u, but there" 
-                  "is no registered callback for that id", hdr->am_id);
+                 "is no registered callback for that id", hdr->am_id);
         return UCS_OK;
     }
 
-    if(am_flags & UCT_CB_PARAM_FLAG_DESC){
+    if (am_flags & UCT_CB_PARAM_FLAG_DESC) {
         recv_flags |= UCP_RECV_DESC_FLAG_HDR;
     }
     
@@ -352,12 +352,12 @@ ucp_am_handler(void *am_arg, void *am_data, size_t am_length,
     
     status = (worker->am_cbs[am_id].cb)(worker->am_cbs[am_id].context,
                                         desc + 1, 
-                                        am_length - sizeof(ucp_am_hdr_t),
+                                        am_length - sizeof(*hdr),
                                         UCP_CB_PARAM_FLAG_DATA);
     
-    if(status == UCS_INPROGRESS && (am_flags & UCT_CB_PARAM_FLAG_DESC)) {
+    if ((status == UCS_INPROGRESS) && (am_flags & UCT_CB_PARAM_FLAG_DESC)) {
         status = UCS_INPROGRESS;
-    } else if(status == UCS_OK && !(am_flags & UCT_CB_PARAM_FLAG_DESC)) {
+    } else if ((status == UCS_OK) && !(am_flags & UCT_CB_PARAM_FLAG_DESC)) {
         ucp_recv_desc_release(desc);
     } else {
         status = UCS_OK;
@@ -366,23 +366,55 @@ ucp_am_handler(void *am_arg, void *am_data, size_t am_length,
     return status;
 }
 
+static ucs_status_t
+ucp_am_find_parent(ucp_worker_h worker, ucp_ep_ext_proto_t *ep_ext, 
+                   ucp_am_long_hdr_t *hdr, size_t am_length, uint16_t am_id)
+{
+    ucp_am_unfinished_t *parent_am;
+    ucs_status_t status;
+    
+    ucs_list_for_each(parent_am, &ep_ext->am.started_ams, unfinished) {
+        if (parent_am->msg_id == hdr->msg_id) {
+            memcpy(UCS_PTR_BYTE_OFFSET(parent_am->all_data + 1, hdr->offset),
+                   hdr + 1, am_length - sizeof(*hdr));
+            parent_am->left -= am_length - sizeof(*hdr);
+            /* If this is the last callback, we run it and cleanup */
+            if (parent_am->left == 0) {
+                am_id = hdr->am_id;
+
+                status = worker->am_cbs[am_id].cb(worker->am_cbs[am_id].context,
+                                                  parent_am->all_data + 1,
+                                                  hdr->total_size,
+                                                  UCP_CB_PARAM_FLAG_DATA);
+
+                if (status != UCS_INPROGRESS) {
+                    ucs_free(parent_am->all_data);
+                }
+
+                ucs_list_del(&parent_am->unfinished);
+                ucs_free(parent_am);
+            }
+            return UCS_OK;
+        }
+    }
+    return UCS_INPROGRESS;
+}
 
 static ucs_status_t
 ucp_am_long_handler(void *am_arg, void *am_data, size_t am_length,
-               unsigned am_flags)
+                    unsigned am_flags)
 { 
     ucp_worker_h worker = (ucp_worker_h) am_arg;
-    ucs_status_t status;
     ucp_am_long_hdr_t *long_hdr = (ucp_am_long_hdr_t *) am_data;
     ucp_ep_h ep = ucp_worker_get_ep_by_ptr(worker, long_hdr->ep);
     ucp_ep_ext_proto_t *ep_ext = ucp_ep_ext_proto(ep);
-    ucp_am_unfinished_t *parent_am;
     uint16_t am_id;
     ucp_recv_desc_t *all_data;
     size_t left;
     ucp_am_unfinished_t *unfinished;
-
-    if(worker->am_cbs[long_hdr->am_id].cb == NULL){
+    ucs_status_t status;
+    
+    if (worker->am_cbs[long_hdr->am_id].cb == NULL) {
         ucs_warn("UCP Active Message was received with id : %u, but there"
                   "is no registered callback for that id", long_hdr->am_id);
         goto out;
@@ -393,31 +425,12 @@ ucp_am_long_handler(void *am_arg, void *am_data, size_t am_length,
      * have arrived. If any messages have arrived,
      * we copy ourselves into the buffer and leave
      */
-    ucs_list_for_each(parent_am, &ep_ext->am.started_ams, unfinished)
-    {
-        if (parent_am->msg_id == long_hdr->msg_id) {
-            memcpy(UCS_PTR_BYTE_OFFSET(parent_am->all_data + 1, long_hdr->offset),
-                   long_hdr + 1, am_length - sizeof(ucp_am_long_hdr_t));
-            parent_am->left -= am_length - sizeof(ucp_am_long_hdr_t);
-            /* If this is the last callback, we run it and cleanup */
-            if (parent_am->left == 0) {
-                am_id = long_hdr->am_id;
-
-                status = worker->am_cbs[am_id].cb(worker->am_cbs[am_id].context,
-                                                  parent_am->all_data + 1,
-                                                  long_hdr->total_size,
-                                                  UCP_CB_PARAM_FLAG_DATA);
-
-                if (status != UCS_INPROGRESS) {
-                    ucs_free(parent_am->all_data);
-                }
-
-                ucs_list_del(&parent_am->unfinished);
-                ucs_free(parent_am);
-            }
-            goto out;
-        }
+    status = ucp_am_find_parent(worker, ep_ext, long_hdr, am_length, am_id);
+    
+    if (status == UCS_OK) {
+        goto out;
     }
+    
     /* If I am first, I make the buffer for everyone to go into,
      * copy myself in, and put myself on the list so people can find me
      */

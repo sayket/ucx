@@ -85,7 +85,7 @@ typedef struct ucp_ep                    *ucp_ep_h;
  * @ingroup UCP_ENDPOINT
  * @brief Callback to process incoming active message
  *
- * When the callback is called, @a flags indicates how @a should be handled.
+ * When the callback is called, @a flags indicates how @a data should be handled.
  *  
  * @param [in]  arg     User-defined argument.
  * @param [in]  data    Points to the received data. This data may
@@ -96,8 +96,8 @@ typedef struct ucp_ep                    *ucp_ep_h;
  *                      the callback can return UCS_INPROGRESS and
  *                      data will persist after the callback returns
  *
- * @return UCS_OK       A descriptor will not be allocated and data will
- *                      not be available when the callback returns
+ * @return UCS_OK       @a data will not persist after the callback returns
+ *                      
  * @return UCS_INPROGRESS Can only be returned if flags is set to
  *                        UCP_CB_PARAM_FLAG_DATA. If UCP_INPROGRESS
  *                        is returned, data will persist after the

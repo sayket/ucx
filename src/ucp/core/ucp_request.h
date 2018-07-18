@@ -72,10 +72,13 @@ enum {
     UCP_RECV_DESC_FLAG_EAGER_SYNC     = UCS_BIT(3), /* Eager tag message which requires reply */
     UCP_RECV_DESC_FLAG_EAGER_OFFLOAD  = UCS_BIT(4), /* Eager tag from offload */
     UCP_RECV_DESC_FLAG_RNDV           = UCS_BIT(5), /* Rendezvous request */
-    UCP_RECV_DESC_FLAG_MALLOC         = UCS_BIT(6),  /* Descriptor was allocated with malloc 
+    UCP_RECV_DESC_FLAG_MALLOC         = UCS_BIT(6), /* Descriptor was allocated with malloc 
                                                        and must be freed, not returned to the
                                                        memory pool */
-    UCP_RECV_DESC_FLAG_HDR            = UCS_BIT(7)    
+    UCP_RECV_DESC_FLAG_HDR            = UCS_BIT(7)  /* Descriptor was orignally allocated by
+                                                       uct and the ucp level am header must
+                                                       be accounted for when releasing 
+                                                       descriptors */
 };
 
 
@@ -187,6 +190,8 @@ struct ucp_request {
 
                 struct {
                     uint16_t am_id;
+                    uint64_t message_id;  /* used to identify matching parts
+                                             of a large message */
                 } am;
             };
 
