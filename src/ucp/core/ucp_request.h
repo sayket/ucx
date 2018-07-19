@@ -90,6 +90,13 @@ enum {
     UCP_RDESC_ALL_LIST  = 1
 };
 
+/**
+ * Send request type
+ */
+typedef enum {
+    UCP_AM_TYPE = 0,
+    UCP_TAG_TYPE = 1
+} ucp_send_req_type_t;
 
 /**
  * Request in progress.
@@ -106,6 +113,7 @@ struct ucp_request {
             size_t                length;   /* Total length, in bytes */
             uct_memory_type_t     mem_type; /* Memory type */
             ucp_send_callback_t   cb;       /* Completion callback */
+            ucp_send_req_type_t   type;
 
             union {
 

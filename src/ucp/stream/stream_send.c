@@ -34,6 +34,7 @@ static void ucp_stream_send_req_init(ucp_request_t* req, ucp_ep_h ep,
     req->send.datatype     = datatype;
     req->send.mem_type     = UCT_MD_MEM_TYPE_HOST;
     req->send.lane         = ep->am_lane;
+    req->send.type         = UCP_TAG_TYPE;
     ucp_request_send_state_init(req, datatype, count);
     req->send.length       = ucp_dt_length(req->send.datatype, count,
                                            req->send.buffer,

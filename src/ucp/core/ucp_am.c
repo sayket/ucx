@@ -115,6 +115,7 @@ size_t bcopy_pack_args_mid(void *dest, void *arg)
     ucp_am_long_hdr_t *hdr = dest;
     ucp_request_t *req = arg;
     size_t length;
+ 
     length = ucs_min(ucp_ep_get_max_bcopy(req->send.ep, req->send.lane) - 
                      sizeof(*hdr),
                      req->send.length - req->send.state.dt.offset);
@@ -165,8 +166,9 @@ static ucs_status_t ucp_am_contig_short(uct_pending_req_t *self)
 
 static ucs_status_t ucp_am_bcopy_single(uct_pending_req_t *self)
 {
-    ucs_status_t status;
     ucp_request_t *req = ucs_container_of(self, ucp_request_t, send.uct);
+    ucs_status_t status;
+    
     status = ucp_do_am_bcopy_single(self, UCP_AM_ID_SINGLE, 
                                     bcopy_pack_args_single);
     if (status == UCS_OK) {
@@ -235,6 +237,7 @@ static void ucp_am_send_req_init(ucp_request_t *req, ucp_ep_h ep,
     req->send.datatype = datatype;
     req->send.mem_type = UCT_MD_MEM_TYPE_HOST;
     req->send.lane = ep->am_lane;
+    req->send.type = UCP_AM_TYPE;
     ucp_request_send_state_init(req, datatype, count);
     req->send.length = ucp_dt_length(req->send.datatype, count,
                                      req->send.buffer,
@@ -283,12 +286,11 @@ ucs_status_ptr_t ucp_am_send_nb(ucp_ep_h ep, uint16_t id,
 {
     ucs_status_t status;
     ucs_status_ptr_t ret;
-    size_t length;
     ucp_request_t *req;
+    size_t length;
 
     if (ucs_unlikely(flags != 0)) {
-        ret = UCS_STATUS_PTR(UCS_ERR_NOT_IMPLEMENTED);
-        return ret;
+        return UCS_STATUS_PTR(UCS_ERR_NOT_IMPLEMENTED);
     }
 
     UCP_THREAD_CS_ENTER_CONDITIONAL(&ep->worker->mt_lock);
@@ -331,11 +333,11 @@ ucp_am_handler(void *am_arg, void *am_data, size_t am_length,
 {
     ucp_worker_h worker = (ucp_worker_h) am_arg;
     ucp_am_hdr_t *hdr = (ucp_am_hdr_t *) am_data;
-    ucs_status_t status;
     ucp_recv_desc_t *desc = NULL;
     uint16_t recv_flags = 0;
     uint16_t am_id      = hdr->am_id;
-    
+    ucs_status_t status;
+
     if (worker->am_cbs[hdr->am_id].cb == NULL) {
         ucs_warn("UCP Active Message was received with id : %u, but there" 
                  "is no registered callback for that id", hdr->am_id);
