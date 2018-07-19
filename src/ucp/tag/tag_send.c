@@ -125,7 +125,7 @@ ucp_tag_send_req_init(ucp_request_t* req, ucp_ep_h ep, const void* buffer,
     req->send.buffer       = buffer;
     req->send.datatype     = datatype;
     req->send.tag.tag      = tag;
-    req->send.type         = UCP_TAG_TYPE;
+    req->send.type         = UCP_REQUEST_TYPE_SEND_TAG;
     ucp_request_send_state_init(req, datatype, count);
     req->send.length       = ucp_dt_length(req->send.datatype, count,
                                            req->send.buffer,

@@ -237,7 +237,7 @@ static void ucp_am_send_req_init(ucp_request_t *req, ucp_ep_h ep,
     req->send.datatype = datatype;
     req->send.mem_type = UCT_MD_MEM_TYPE_HOST;
     req->send.lane = ep->am_lane;
-    req->send.type = UCP_AM_TYPE;
+    req->send.type = UCP_REQUEST_TYPE_SEND_AM;
     ucp_request_send_state_init(req, datatype, count);
     req->send.length = ucp_dt_length(req->send.datatype, count,
                                      req->send.buffer,

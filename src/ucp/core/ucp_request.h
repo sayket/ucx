@@ -94,8 +94,9 @@ enum {
  * Send request type
  */
 typedef enum {
-    UCP_AM_TYPE = 0,
-    UCP_TAG_TYPE = 1
+    UCP_REQUEST_TYPE_SEND_AM = 0,
+    UCP_REQUEST_TYPE_SEND_TAG = 1,
+    UCP_REQUEST_TYPE_SEND_STREAM = 2
 } ucp_send_req_type_t;
 
 /**

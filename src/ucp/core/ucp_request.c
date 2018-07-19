@@ -323,10 +323,9 @@ ucp_request_send_start(ucp_request_t *req, ssize_t max_short,
             UCS_PROFILE_REQUEST_EVENT(req, "start_bcopy_single", req->send.length);
         } else {
             req->send.uct.func        = proto->bcopy_multi;
-            if (req->send.type == UCP_AM_TYPE) {
+            if (req->send.type == UCP_REQUEST_TYPE_SEND_AM) {
                 req->send.am.message_id = req->send.ep->worker->tm.am.message_id++;
-            }
-            else {
+            } else {
                 req->send.tag.message_id  = req->send.ep->worker->tm.am.message_id++;
                 req->send.tag.am_bw_index = 0;
             }
@@ -358,10 +357,9 @@ ucp_request_send_start(ucp_request_t *req, ssize_t max_short,
 
         if (multi) {
             req->send.uct.func        = proto->zcopy_multi;
-            if (req->send.type == UCP_AM_TYPE) {
+            if (req->send.type == UCP_REQUEST_TYPE_SEND_AM) {
                 req->send.am.message_id = req->send.ep->worker->tm.am.message_id++;
-            }
-            else {
+            } else {
                 req->send.tag.message_id  = req->send.ep->worker->tm.am.message_id++;
                 req->send.tag.am_bw_index = 0;
             }
