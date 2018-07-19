@@ -408,7 +408,6 @@ ucp_am_long_handler(void *am_arg, void *am_data, size_t am_length,
     ucp_am_long_hdr_t *long_hdr = (ucp_am_long_hdr_t *) am_data;
     ucp_ep_h ep = ucp_worker_get_ep_by_ptr(worker, long_hdr->ep);
     ucp_ep_ext_proto_t *ep_ext = ucp_ep_ext_proto(ep);
-    uint16_t am_id;
     ucp_recv_desc_t *all_data;
     size_t left;
     ucp_am_unfinished_t *unfinished;
@@ -425,7 +424,7 @@ ucp_am_long_handler(void *am_arg, void *am_data, size_t am_length,
      * have arrived. If any messages have arrived,
      * we copy ourselves into the buffer and leave
      */
-    status = ucp_am_find_parent(worker, ep_ext, long_hdr, am_length, am_id);
+    status = ucp_am_find_parent(worker, ep_ext, long_hdr, am_length, long_hdr->am_id);
     
     if (status == UCS_OK) {
         goto out;
