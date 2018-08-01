@@ -839,10 +839,10 @@ ucs_status_t ucp_worker_iface_init(ucp_worker_h worker, ucp_rsc_index_t tl_id,
 
     VALGRIND_MAKE_MEM_UNDEFINED(&wiface->attr, sizeof(wiface->attr));
     status = uct_iface_query(wiface->iface, &wiface->attr);
+    
     if (status != UCS_OK) {
         goto out;
     }
-
     /* Set wake-up handlers */
     if (wiface->attr.cap.flags & UCP_WORKER_UCT_ALL_EVENT_CAP_FLAGS) {
         status = uct_iface_event_fd_get(wiface->iface, &wiface->event_fd);
@@ -1130,7 +1130,6 @@ unsigned ucp_worker_get_ep_config(ucp_worker_h worker,
         /* TODO support larger number of configurations */
         ucs_fatal("too many ep configurations: %d", worker->ep_config_count);
     }
-
     /* Create new configuration */
     config_idx = worker->ep_config_count++;
     config     = &worker->ep_config[config_idx];
@@ -1189,6 +1188,8 @@ ucs_status_t ucp_worker_create(ucp_context_h context,
     ucs_list_head_init(&worker->arm_ifaces);
     ucs_list_head_init(&worker->stream_ready_eps);
     ucs_list_head_init(&worker->all_eps);
+    ucs_list_head_init(&worker->wireup_list);
+    
     ucp_ep_match_init(&worker->ep_match_ctx);
 
     UCS_STATIC_ASSERT(sizeof(ucp_ep_ext_gen_t) <= sizeof(ucp_ep_t));

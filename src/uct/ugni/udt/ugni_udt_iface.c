@@ -87,10 +87,11 @@ static ucs_status_t recieve_datagram(uct_ugni_udt_iface_t *iface, uint64_t id, u
 
     header = uct_ugni_udt_get_rheader(desc, iface);
 
-    ucs_trace("Got datagram id: %lu type: %i len: %i am_id: %i", id, header->type, header->length, header->am_id);
+    ucs_warn("Got datagram id: %lu type: %i len: %i am_id: %i", id, header->type, header->length, header->am_id);
 
     if (UCT_UGNI_UDT_PAYLOAD != header->type) {
         /* ack message, no data */
+        ucs_warn("got an ack and am clearing "); 
         ucs_assert_always(NULL != ep);
         ucs_mpool_put(ep->posted_desc);
         uct_ugni_check_flush(ep->desc_flush_group);
@@ -100,6 +101,8 @@ static ucs_status_t recieve_datagram(uct_ugni_udt_iface_t *iface, uint64_t id, u
 
     return UCS_INPROGRESS;
 }
+
+void uct_ugni_proccess_datagram_pipe(int event_id, void *arg);
 
 static void *uct_ugni_udt_device_thread(void *arg)
 {
@@ -113,7 +116,7 @@ static void *uct_ugni_udt_device_thread(void *arg)
             pthread_cond_wait(&iface->device_condition, &iface->device_lock);
         }
         pthread_mutex_unlock(&iface->device_lock);
-        ugni_rc = GNI_PostdataProbeWaitById(uct_ugni_udt_iface_nic_handle(iface),-1,&id);
+        ugni_rc = GNI_PostdataProbeWaitById(uct_ugni_udt_iface_nic_handle(iface), -1, &id);
         if (ucs_unlikely(GNI_RC_SUCCESS != ugni_rc)) {
             ucs_error("GNI_PostDataProbeWaitById, Error status: %s %d\n",
                       gni_err_str[ugni_rc], ugni_rc);
@@ -126,8 +129,9 @@ static void *uct_ugni_udt_device_thread(void *arg)
             break;
         }
         iface->events_ready = 1;
-        ucs_trace("Recieved a new datagram");
+        ucs_warn("Recieved a new datagram");
         ucs_async_pipe_push(&iface->event_pipe);
+        uct_ugni_proccess_datagram_pipe(0, (void *)iface);
     }
 
     return NULL;
@@ -202,7 +206,6 @@ void uct_ugni_proccess_datagram_pipe(int event_id, void *arg) {
     uint64_t id;
 
     ucs_trace_func("");
-
     uct_ugni_cdm_lock(&iface->super.cdm);
     ugni_rc = GNI_PostDataProbeById(uct_ugni_udt_iface_nic_handle(iface), &id);
     uct_ugni_cdm_unlock(&iface->super.cdm);
@@ -210,7 +213,7 @@ void uct_ugni_proccess_datagram_pipe(int event_id, void *arg) {
         status = recieve_datagram(iface, id, &ep);
         if (UCS_INPROGRESS == status) {
             if (ep != NULL){
-                ucs_trace_data("Processing reply");
+                ucs_warn("Processing reply");
                 datagram = ep->posted_desc;
                 status = processs_datagram(iface, datagram);
                 if (UCS_OK != status) {
@@ -221,8 +224,9 @@ void uct_ugni_proccess_datagram_pipe(int event_id, void *arg) {
                 }
                 ep->posted_desc = NULL;
                 uct_ugni_check_flush(ep->desc_flush_group);
+                ucs_warn("done processing reply ");
             } else {
-                ucs_trace_data("Processing wildcard");
+                ucs_warn("Processing wildcard");
                 datagram = iface->desc_any;
                 status = processs_datagram(iface, datagram);
                 if (UCS_OK != status) {
@@ -248,7 +252,7 @@ void uct_ugni_proccess_datagram_pipe(int event_id, void *arg) {
     pthread_mutex_lock(&iface->device_lock);
     iface->events_ready = 0;
     pthread_mutex_unlock(&iface->device_lock);
-    ucs_trace("Signaling device thread to resume monitoring");
+    ucs_warn("Signaling device thread to resume monitoring");
     pthread_cond_signal(&iface->device_condition);
 
 }
@@ -296,7 +300,6 @@ static inline void uct_ugni_udt_terminate_thread(uct_ugni_udt_iface_t *iface)
 {
     gni_return_t ugni_rc;
     gni_ep_handle_t   ep;
-
     uct_ugni_cdm_lock(&iface->super.cdm);
     ugni_rc = GNI_EpCreate(uct_ugni_udt_iface_nic_handle(iface), iface->super.local_cq, &ep);
     if (GNI_RC_SUCCESS != ugni_rc) {
@@ -438,21 +441,21 @@ static UCS_CLASS_INIT_FUNC(uct_ugni_udt_iface_t, uct_md_h md, uct_worker_h worke
         ucs_error("Failed to post wildcard request");
         goto clean_any_desc;
     }
-
+    /*
     status = ucs_async_set_event_handler(self->super.super.worker->async->mode,
                                          ucs_async_pipe_rfd(&self->event_pipe),
                                          POLLIN,
                                          uct_ugni_proccess_datagram_pipe,
                                          self, self->super.super.worker->async);
-                                 
+    */                           
     if (UCS_OK != status) {
         goto clean_cancel_desc;
     }
-
+    
     pthread_mutex_init(&self->device_lock, NULL);
     pthread_cond_init(&self->device_condition, NULL);
     self->events_ready = 0;
-
+    
     rc = pthread_create(&self->event_thread, NULL, uct_ugni_udt_device_thread, self);
     if(0 != rc) {
         goto clean_remove_event;

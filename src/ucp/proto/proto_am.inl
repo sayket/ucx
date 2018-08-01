@@ -28,6 +28,7 @@ ucp_do_am_bcopy_single(uct_pending_req_t *self, uint8_t am_id,
     packed_len     = uct_ep_am_bcopy(ep->uct_eps[req->send.lane], am_id, pack_cb,
                                      req, 0);
     if (packed_len < 0) {
+        req->send.state.dt.offset = 0;
         return packed_len;
     }
 
@@ -49,6 +50,7 @@ ucs_status_t ucp_do_am_bcopy_multi(uct_pending_req_t *self, uint8_t am_id_first,
     ssize_t packed_len;
     uct_ep_h uct_ep;
     size_t offset;
+    size_t length;
     int pending_adde_res;
 
     offset         = req->send.state.dt.offset;
@@ -81,9 +83,13 @@ ucs_status_t ucp_do_am_bcopy_multi(uct_pending_req_t *self, uint8_t am_id_first,
                 /* Last */
                 return UCS_OK;
             }
+
         }
 
         if (ucs_unlikely(packed_len < 0)) {
+	    length = ucs_min(ucp_ep_get_max_bcopy(req->send.ep, req->send.lane) - hdr_size_middle,
+	                     req->send.length - offset);
+	    req->send.state.dt.offset -= length;
             if (req->send.lane != req->send.pending_lane) {
                 /* switch to new pending lane */
                 pending_adde_res = ucp_request_pending_add(req, &status);

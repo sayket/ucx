@@ -82,7 +82,6 @@ static UCS_CLASS_CLEANUP_FUNC(uct_ugni_udt_ep_t)
     gni_post_state_t post_state;
 
     if (self->posted_desc) {
-        ucs_debug("Cleaning outstanding request");
         uct_ugni_cdm_lock(&iface->super.cdm);
         ugni_rc = GNI_EpPostDataCancelById(self->super.ep, self->super.hash_key);
         uct_ugni_cdm_unlock(&iface->super.cdm);
@@ -175,7 +174,6 @@ uct_ugni_udt_ep_am_common_send(const unsigned is_short, uct_ugni_udt_ep_t *ep, u
     sheader->type = UCT_UGNI_UDT_PAYLOAD;
 
     ucs_assertv(msg_length <= GNI_DATAGRAM_MAXSIZE, "msg_length=%u", msg_length);
-
     uct_ugni_cdm_lock(&iface->super.cdm);
     ugni_rc = GNI_EpPostDataWId(ep->super.ep,
                                 sheader, msg_length,

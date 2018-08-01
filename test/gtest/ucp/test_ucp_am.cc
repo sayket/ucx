@@ -43,6 +43,7 @@ void test_ucp_am_base::ucp_put_am_cb(void *request, ucs_status_t status){
 
 ucs_status_t test_ucp_am_base::ucp_process_am_cb(void *arg, void *data,
                                                  size_t length, unsigned flags){
+    fprintf(stderr, "running callback\n");
     test_ucp_am_base *self = reinterpret_cast<test_ucp_am_base*>(arg);
     return self->am_handler(self, data, length, flags);
 
@@ -114,6 +115,7 @@ void test_ucp_am::do_send_process_data_test(int test_release, uint16_t am_id)
         for(size_t j = 0; j < i; j++){
             buf[j] = i;
         }
+        printf("sending a message1\n");
         sstatus = ucp_am_send_nb(receiver().ep(), am_id, 
                                  buf.data(), 1, ucp_dt_make_contig(i), 
                                  test_ucp_am_base::ucp_put_am_cb, 0);

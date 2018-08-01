@@ -31,6 +31,8 @@ typedef struct uct_ugni_smsg_iface {
     size_t                bytes_per_mbox;
     uct_ugni_smsg_desc_t *smsg_list[UCT_UGNI_HASH_SIZE]; /**< A list of descriptors currently outstanding */
     ucs_spinlock_t        mbox_lock; /**< Lock for processing SMSG mboxes */
+    int                   epfd;
+    gni_comp_chan_handle_t cc_handle;
 } uct_ugni_smsg_iface_t;
 
 typedef struct uct_ugni_smsg_header {

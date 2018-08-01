@@ -102,7 +102,7 @@ ucs_status_t ucp_ep_new(ucp_worker_h worker, const char *peer_name,
 
     ucs_list_add_tail(&worker->all_eps, &ucp_ep_ext_gen(ep)->ep_list);
     *ep_p = ep;
-    ucs_debug("created ep %p to %s %s", ep, ucp_ep_peer_name(ep), message);
+    ucs_debug("created ep %p to %s %s ", ep, ucp_ep_peer_name(ep), message);
     return UCS_OK;
 
 err_free_ep:
@@ -277,7 +277,8 @@ ucs_status_t ucp_ep_init_create_wireup(ucp_ep_h ep,
     key.rma_lanes[0]          = 0;
     key.rma_bw_lanes[0]       = 0;
     key.amo_lanes[0]          = 0;
-
+    
+    ucs_warn("calling in create wireup");
     ep->cfg_index             = ucp_worker_get_ep_config(ep->worker, &key);
     ep->am_lane               = 0;
     ep->flags                |= UCP_EP_FLAG_CONNECT_REQ_QUEUED;
@@ -709,7 +710,6 @@ int ucp_ep_config_is_equal(const ucp_ep_config_key_t *key1,
 {
     ucp_lane_index_t lane;
 
-
     if ((key1->num_lanes        != key2->num_lanes)                                ||
         memcmp(key1->rma_lanes,    key2->rma_lanes,    sizeof(key1->rma_lanes))    ||
         memcmp(key1->am_bw_lanes,  key2->am_bw_lanes,  sizeof(key1->am_bw_lanes))  ||
@@ -725,7 +725,6 @@ int ucp_ep_config_is_equal(const ucp_ep_config_key_t *key1,
     {
         return 0;
     }
-
     for (lane = 0; lane < key1->num_lanes; ++lane) {
         if ((key1->lanes[lane].rsc_index != key2->lanes[lane].rsc_index) ||
             (key1->lanes[lane].proxy_lane != key2->lanes[lane].proxy_lane) ||

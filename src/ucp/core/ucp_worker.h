@@ -184,6 +184,7 @@ typedef struct ucp_worker {
     ucs_strided_alloc_t           ep_alloc;      /* Endpoint allocator */
     ucs_list_link_t               stream_ready_eps; /* List of EPs with received stream data */
     ucs_list_link_t               all_eps;       /* List of all endpoints */
+    ucs_list_link_t               wireup_list;             
     ucp_ep_match_ctx_t            ep_match_ctx;  /* Endpoint-to-endpoint matching context */
     ucp_worker_iface_t            *ifaces;       /* Array of interfaces, one for each resource */
     ucs_mpool_t                   am_mp;         /* Memory pool for AM receives */
@@ -203,6 +204,7 @@ typedef struct ucp_worker {
     unsigned                      ep_config_max;   /* Maximal number of configurations */
     unsigned                      ep_config_count; /* Current number of configurations */
     ucp_ep_config_t               ep_config[0];    /* Array of transport limits and thresholds */
+
 } ucp_worker_t;
 
 

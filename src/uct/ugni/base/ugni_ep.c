@@ -161,7 +161,6 @@ ucs_status_t ugni_connect_ep(uct_ugni_iface_t *iface,
                              const uct_sockaddr_ugni_t *iface_addr,
                              uct_ugni_ep_t *ep){
     gni_return_t ugni_rc;
-
     uct_ugni_cdm_lock(&iface->cdm);
     ugni_rc = GNI_EpBind(ep->ep, dev_addr->nic_addr, iface_addr->domain_id);
     uct_ugni_cdm_unlock(&iface->cdm);
@@ -208,7 +207,7 @@ UCS_CLASS_INIT_FUNC(uct_ugni_ep_t, uct_iface_t *tl_iface,
                   gni_err_str[ugni_rc], ugni_rc);
         return UCS_ERR_NO_DEVICE;
     }
-
+    ucs_warn("addr : %p ", addr);
     if(NULL != addr){
         rc = ugni_connect_ep(iface, ugni_dev_addr, iface_addr, self);
     }

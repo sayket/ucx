@@ -146,7 +146,7 @@ ucp_address_gather_devices(ucp_worker_h worker, uint64_t tl_bitmap, int has_ep,
             !(iface_attr->cap.flags & UCT_IFACE_FLAG_CONNECT_TO_EP)) {
             continue;
         }
-
+        
         dev = ucp_address_get_device(context->tl_rscs[i].tl_rsc.dev_name,
                                      devices, &num_devices);
 
@@ -475,7 +475,7 @@ ucs_status_t ucp_address_pack(ucp_worker_h worker, ucp_ep_h ep, uint64_t tl_bitm
 
     /* Calculate packed size */
     size = ucp_address_packed_size(worker, devices, num_devices);
-
+    
     /* Allocate address */
     buffer = ucs_malloc(size, "ucp_address");
     if (buffer == NULL) {
@@ -494,7 +494,6 @@ ucs_status_t ucp_address_pack(ucp_worker_h worker, ucp_ep_h ep, uint64_t tl_bitm
     }
 
     VALGRIND_CHECK_MEM_IS_DEFINED(buffer, size);
-
     *size_p   = size;
     *buffer_p = buffer;
     status    = UCS_OK;
@@ -525,12 +524,13 @@ ucs_status_t ucp_address_unpack(const void *buffer,
 
     ptr = buffer;
     unpacked_address->uuid = *(uint64_t*)ptr;
-    ptr += sizeof(uint64_t);
 
+    ptr += sizeof(uint64_t);
     aptr = ucp_address_unpack_string(ptr, unpacked_address->name,
                                      sizeof(unpacked_address->name));
 
     address_count = 0;
+
 
     /* Count addresses */
     ptr = aptr;
@@ -571,6 +571,7 @@ ucs_status_t ucp_address_unpack(const void *buffer,
         }
 
     } while (!last_dev);
+
 
 
     /* Allocate address list */

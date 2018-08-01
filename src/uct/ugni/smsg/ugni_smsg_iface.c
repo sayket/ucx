@@ -61,7 +61,6 @@ static void process_mbox(uct_ugni_smsg_iface_t *iface, uct_ugni_smsg_ep_t *ep){
     gni_return_t ugni_rc;
     uct_ugni_smsg_header_t *header;
     void *user_data;
-
     /* Only one thread at a time can process mboxes for the iface. After it's done
        then everyone's messages have been drained. */
     if (!ucs_spin_trylock(&iface->mbox_lock)) {
@@ -208,6 +207,8 @@ static ucs_status_t uct_ugni_smsg_iface_query(uct_iface_h tl_iface, uct_iface_at
                                          UCT_IFACE_FLAG_AM_BCOPY |
                                          UCT_IFACE_FLAG_CONNECT_TO_EP |
                                          UCT_IFACE_FLAG_CB_SYNC  |
+                                         UCT_IFACE_FLAG_EVENT_SEND_COMP  |
+                                         UCT_IFACE_FLAG_EVENT_RECV |
                                          UCT_IFACE_FLAG_PENDING;
 
     iface_attr->overhead               = 1e-6;  /* 1 usec */
@@ -228,6 +229,14 @@ static UCS_CLASS_CLEANUP_FUNC(uct_ugni_smsg_iface_t)
     ucs_spinlock_destroy(&self->mbox_lock);
 }
 
+static ucs_status_t uct_ugni_smsg_iface_event_fd_get(uct_iface_h tl_iface, int *fd_p)
+{
+    uct_ugni_smsg_iface_t *iface = ucs_derived_of(tl_iface, uct_ugni_smsg_iface_t);
+
+    *fd_p = iface->epfd;
+    return UCS_OK;
+}
+
 static uct_iface_ops_t uct_ugni_smsg_iface_ops = {
     .ep_am_short              = uct_ugni_smsg_ep_am_short,
     .ep_am_bcopy              = uct_ugni_smsg_ep_am_bcopy,
@@ -239,6 +248,8 @@ static uct_iface_ops_t uct_ugni_smsg_iface_ops = {
     .ep_destroy               = UCS_CLASS_DELETE_FUNC_NAME(uct_ugni_smsg_ep_t),
     .ep_get_address           = uct_ugni_smsg_ep_get_address,
     .ep_connect_to_ep         = uct_ugni_smsg_ep_connect_to_ep,
+    .iface_event_fd_get       = uct_ugni_smsg_iface_event_fd_get,
+    .iface_event_arm          = ucs_empty_function_return_success,
     .iface_flush              = uct_ugni_iface_flush,
     .iface_fence              = uct_base_iface_fence,
     .iface_progress_enable    = ucs_empty_function,
@@ -349,6 +360,22 @@ static UCS_CLASS_INIT_FUNC(uct_ugni_smsg_iface_t, uct_md_h md, uct_worker_h work
      * udt layer so each ugni layer will have own progress */
     uct_worker_progress_add_safe(self->super.super.worker, uct_ugni_smsg_progress,
                                  self, &self->super.super.prog);
+
+    ugni_rc = GNI_CompChanCreate(self->super.cdm.nic_handle, &(self->cc_handle));
+    
+    if (ugni_rc != GNI_RC_SUCCESS) {
+        ucs_error("Smsg comp chan create failure.");
+        status = UCS_ERR_INVALID_PARAM;
+        goto clean_desc;
+    }
+    
+    ugni_rc = GNI_CompChanFd(self->cc_handle, &(self->epfd));
+    
+    if (ugni_rc != GNI_RC_SUCCESS) {
+        ucs_error("Smsg comp chan Fd failure.");
+        status = UCS_ERR_INVALID_PARAM;
+        goto clean_desc;
+    }
 
     return UCS_OK;
 

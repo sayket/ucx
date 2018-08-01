@@ -10,6 +10,7 @@
 #include <ucs/sys/compiler_def.h>
 #include <ucs/datastruct/list_types.h>
 
+#include <stdio.h>
 
 #define UCS_LIST_INITIALIZER(_prev, _next) \
     { (_prev), (_next) }

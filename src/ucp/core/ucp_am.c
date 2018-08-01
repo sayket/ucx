@@ -315,7 +315,6 @@ ucs_status_ptr_t ucp_am_send_nb(ucp_ep_h ep, uint16_t id,
     }
 
     ucp_am_send_req_init(req, ep, payload, datatype, count, flags, id);
-  
     ret = ucp_am_send_req(req, count, &ucp_ep_config(ep)->am, cb,
                           ucp_ep_config(ep)->am_u.proto);
 
@@ -395,10 +394,10 @@ ucp_am_long_handler(void *am_arg, void *am_data, size_t am_length,
             memcpy(UCS_PTR_BYTE_OFFSET(parent_am->all_data + 1, long_hdr->offset),
                    long_hdr + 1, am_length - sizeof(ucp_am_long_hdr_t));
             parent_am->left -= am_length - sizeof(ucp_am_long_hdr_t);
+            
             /* If this is the last callback, we run it and cleanup */
             if (parent_am->left == 0) {
                 am_id = long_hdr->am_id;
-
                 status = worker->am_cbs[am_id].cb(worker->am_cbs[am_id].context,
                                                   parent_am->all_data + 1,
                                                   long_hdr->total_size,
@@ -421,7 +420,6 @@ ucp_am_long_handler(void *am_arg, void *am_data, size_t am_length,
                                            + sizeof(ucp_recv_desc_t));
 
     all_data->flags |= UCP_RECV_DESC_FLAG_MALLOC;
-
     size_t left = long_hdr->total_size - (am_length -
                                           sizeof(ucp_am_long_hdr_t));
     /* We know this one goes first */

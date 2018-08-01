@@ -25,10 +25,35 @@
 
 static size_t ucp_wireup_msg_pack(void *dest, void *arg)
 {
+    int rsc_index;
+    size_t length;
+    size_t max_bcopy;
+    ucp_request_t *req = arg;
+    
+    rsc_index = ucp_wireup_ep_get_aux_rsc_index(
+                    req->send.ep->uct_eps[ucp_ep_get_wireup_msg_lane(req->send.ep)]);
+    
+    max_bcopy = req->send.ep->worker->ifaces[rsc_index].attr.cap.am.max_bcopy;
+    length = ucs_min(req->send.length + sizeof(ucp_wireup_msg_t),
+                     max_bcopy);
+    
+    *(ucp_wireup_msg_t*)dest = req->send.wireup;
+    memcpy((ucp_wireup_msg_t*)dest + 1, req->send.buffer, length - sizeof(ucp_wireup_msg_t));
+    return length;
+}
+
+static size_t ucp_wireup_msg_pack_long(void *dest, void *arg)
+{
+    size_t length;
     ucp_request_t *req = arg;
     *(ucp_wireup_msg_t*)dest = req->send.wireup;
-    memcpy((ucp_wireup_msg_t*)dest + 1, req->send.buffer, req->send.length);
-    return sizeof(ucp_wireup_msg_t) + req->send.length;
+    length = ucs_min(ucp_ep_get_max_bcopy(req->send.ep, req->send.lane) - 
+                     sizeof(ucp_wireup_msg_t),
+                     req->send.length - req->send.state.dt.offset);
+    memcpy((ucp_wireup_msg_t*)dest + 1, 
+           UCS_PTR_BYTE_OFFSET(req->send.buffer, req->send.state.dt.offset),
+           length);
+    return sizeof(ucp_wireup_msg_t) + length;
 }
 
 ucs_status_t ucp_wireup_msg_progress(uct_pending_req_t *self)
@@ -37,6 +62,8 @@ ucs_status_t ucp_wireup_msg_progress(uct_pending_req_t *self)
     ucp_ep_h ep = req->send.ep;
     ssize_t packed_len;
     unsigned am_flags;
+    ucp_rsc_index_t rsc_index;
+    size_t max_bcopy;
 
     if (req->send.wireup.type == UCP_WIREUP_MSG_REQUEST) {
         if (ep->flags & UCP_EP_FLAG_REMOTE_CONNECTED) {
@@ -64,15 +91,62 @@ ucs_status_t ucp_wireup_msg_progress(uct_pending_req_t *self)
     VALGRIND_CHECK_MEM_IS_DEFINED(&req->send.wireup, sizeof(req->send.wireup));
     VALGRIND_CHECK_MEM_IS_DEFINED(req->send.buffer, req->send.length);
 
+    rsc_index = ucp_wireup_ep_get_aux_rsc_index(
+                    req->send.ep->uct_eps[ucp_ep_get_wireup_msg_lane(req->send.ep)]);
+    
+    max_bcopy = req->send.ep->worker->ifaces[rsc_index].attr.cap.am.max_bcopy;
+
+    req->send.wireup.total_len = req->send.length;
+    req->send.wireup.num_msgs = 1 + (req->send.length + sizeof(ucp_wireup_msg_t)) / 
+                                     max_bcopy;
+    req->send.state.dt.offset = 0;
+    ucs_warn("sending a wireup msg of length : %lu ", req->send.length + sizeof(ucp_wireup_msg_t));
+    req->send.wireup.my_msg = 0;
+        /*
+        uint8_t *printer = (void *)&req->send.wireup;
+        size_t i;
+        for(i = 0; i < sizeof(ucp_wireup_msg_t); i++) {
+            fprintf(stderr, "%d ", *printer);
+            printer++;
+        }
+        printer = (void *)req->send.buffer;
+        for(i = 0; i < req->send.length; i++) {
+            fprintf(stderr, "%d ", *printer);
+            printer++;
+        }
+        fprintf(stderr, "\n");
+        */
     packed_len = uct_ep_am_bcopy(ep->uct_eps[req->send.lane], UCP_AM_ID_WIREUP,
-                                 ucp_wireup_msg_pack, req, am_flags);
+                                     ucp_wireup_msg_pack, req, am_flags);
+    ucs_warn("packed_len : %lu sent first message ", packed_len);
+    if (packed_len - sizeof(ucp_wireup_msg_t) < req->send.length) {
+        if (req->send.state.dt.offset == 0) {
+	    req->send.wireup.my_msg++;
+	    req->send.state.dt.offset += packed_len - sizeof(ucp_wireup_msg_t);
+        }
+        while (req->send.state.dt.offset != req->send.length) {
+             //ucp_worker_progress(ep->worker);
+             packed_len = uct_ep_am_bcopy(ep->uct_eps[req->send.lane], 
+                                          UCP_AM_ID_WIREUP, 
+                                          ucp_wireup_msg_pack_long, 
+                                          req, am_flags);
+             if(packed_len < 0){
+                 sleep(1);
+                 ucs_warn("sleepy time ");
+                 continue;
+             }
+             req->send.wireup.my_msg++;
+             req->send.state.dt.offset += packed_len - sizeof(ucp_wireup_msg_t);
+        }
+    }
+
     if (packed_len < 0) {
         if (packed_len != UCS_ERR_NO_RESOURCE) {
             ucs_error("failed to send wireup: %s", ucs_status_string(packed_len));
         }
         return (ucs_status_t)packed_len;
     }
-
+    ucs_warn("completed whole send of msg len : %lu ", req->send.length + sizeof(ucp_wireup_msg_t));
     switch (req->send.wireup.type) {
     case UCP_WIREUP_MSG_PRE_REQUEST:
         ep->flags |= UCP_EP_FLAG_CONNECT_PRE_REQ_SENT;
@@ -136,6 +210,7 @@ static ucs_status_t ucp_wireup_msg_send(ucp_ep_h ep, uint8_t type,
     req->send.wireup.err_mode    = ucp_ep_config(ep)->key.err_mode;
     req->send.wireup.conn_sn     = ep->conn_sn;
     req->send.wireup.src_ep_ptr  = (uintptr_t)ep;
+   
     if (ep->flags & UCP_EP_FLAG_DEST_EP) {
         req->send.wireup.dest_ep_ptr = ucp_ep_dest_ep_ptr(ep);
     } else {
@@ -144,6 +219,7 @@ static ucs_status_t ucp_wireup_msg_send(ucp_ep_h ep, uint8_t type,
 
     req->send.uct.func           = ucp_wireup_msg_progress;
     req->send.datatype           = ucp_dt_make_contig(1);
+    req->send.state.dt.offset    = 0;
     ucp_request_send_state_init(req, ucp_dt_make_contig(1), 0);
 
     /* pack all addresses */
@@ -154,7 +230,7 @@ static ucs_status_t ucp_wireup_msg_send(ucp_ep_h ep, uint8_t type,
         ucs_error("failed to pack address: %s", ucs_status_string(status));
         return status;
     }
-
+    
     req->send.buffer = address;
 
     /* send the indices addresses that should be connected by remote side */
@@ -488,13 +564,61 @@ void ucp_wireup_process_ack(ucp_worker_h worker, const ucp_wireup_msg_t *msg)
 static ucs_status_t ucp_wireup_msg_handler(void *arg, void *data,
                                            size_t length, unsigned flags)
 {
+
     ucp_worker_h worker   = arg;
     ucp_wireup_msg_t *msg = data;
     ucp_unpacked_address_t remote_address;
     ucs_status_t status;
+    ucp_wireup_am_unfinished_t *unfinished;
 
+    ucs_warn("got wireup msg %d of %d ", msg->my_msg, msg->num_msgs);
+    if (msg->num_msgs > 1) {
+        /* guarenteed to happen over one transport */
+        if (msg->my_msg == 0) {
+            void *whole_msg_buf = ucs_malloc(msg->total_len + sizeof(*msg));
+            unfinished = ucs_malloc(sizeof(ucp_wireup_am_unfinished_t));
+            unfinished->buffer = whole_msg_buf;
+            unfinished->length = msg->total_len;
+            unfinished->src_ep_ptr = msg->src_ep_ptr;
+            memcpy(unfinished->buffer, msg, length);
+
+            unfinished->next = UCS_PTR_BYTE_OFFSET(whole_msg_buf, length);
+            ucs_list_add_head(&worker->wireup_list, &unfinished->list_link);
+            return UCS_OK;
+        }
+
+        ucs_list_for_each(unfinished, &worker->wireup_list, list_link)
+        {
+            /* fairly weak matching criteria but it should be okay might add
+               src_ep as criteria*/
+            if (unfinished->length == msg->total_len && unfinished->src_ep_ptr == msg->src_ep_ptr) {
+                memcpy(unfinished->next, msg + 1, length - sizeof(*msg));
+                if (msg->my_msg + 1 != msg->num_msgs) {
+                    unfinished->next = UCS_PTR_BYTE_OFFSET(unfinished->next, 
+                                                           length - sizeof(*msg));
+                    return UCS_OK;
+                }
+                else {
+                    ucs_list_del(&unfinished->list_link);  
+                    break;
+                }
+            }
+        }
+        /* if we get here that means we were the last msg */
+        msg = unfinished->buffer;
+    }
+    
     UCS_ASYNC_BLOCK(&worker->async);
-
+    ucs_warn("got a whole one\n");
+/*
+    uint8_t *printer = (void *)msg;
+    size_t i;
+    for(i = 0; i < sizeof(ucp_wireup_msg_t) + msg->total_len; i++) {
+        fprintf(stderr, "%d \n", *printer);
+        printer++;
+    }
+    fprintf(stderr, "\n\n\n\n\n");
+*/
     status = ucp_address_unpack(msg + 1, &remote_address);
     if (status != UCS_OK) {
         ucs_error("failed to unpack address: %s", ucs_status_string(status));
@@ -518,6 +642,10 @@ static ucs_status_t ucp_wireup_msg_handler(void *arg, void *data,
 
 out:
     UCS_ASYNC_UNBLOCK(&worker->async);
+    if (msg->num_msgs > 1) {
+        ucs_free(msg);
+        ucs_free(unfinished);
+    }
     return UCS_OK;
 }
 
@@ -576,7 +704,7 @@ static ucs_status_t ucp_wireup_connect_lane(ucp_ep_h ep,
     {
         if ((proxy_lane == UCP_NULL_LANE) || (proxy_lane == lane)) {
             /* create an endpoint connected to the remote interface */
-            ucs_trace("ep %p: connect uct_ep[%d] to addr[%d]", ep, lane,
+            ucs_warn("ep %p: connect uct_ep[%d] to addr[%d]", ep, lane,
                       addr_index);
             status = uct_ep_create_connected(worker->ifaces[rsc_index].iface,
                                              address_list[addr_index].dev_addr,
@@ -727,7 +855,6 @@ ucs_status_t ucp_wireup_init_lanes(ucp_ep_h ep, const ucp_ep_params_t *params,
     char str[32];
 
     ucs_trace("ep %p: initialize lanes", ep);
-
     status = ucp_wireup_select_lanes(ep, params, ep_init_flags, address_count,
                                      address_list, addr_indices, &key);
     if (status != UCS_OK) {
@@ -740,7 +867,7 @@ ucs_status_t ucp_wireup_init_lanes(ucp_ep_h ep, const ucp_ep_params_t *params,
     if (ep->cfg_index == new_cfg_index) {
         return UCS_OK; /* No change */
     }
-
+    
     if ((ep->cfg_index != 0) && !ucp_ep_is_sockaddr_stub(ep)) {
         /*
          * TODO handle a case where we have to change lanes and reconfigure the ep:
@@ -762,7 +889,7 @@ ucs_status_t ucp_wireup_init_lanes(ucp_ep_h ep, const ucp_ep_params_t *params,
 
     ep->cfg_index = new_cfg_index;
     ep->am_lane   = key.am_lane;
-
+       
     snprintf(str, sizeof(str), "ep %p", ep);
     ucp_wireup_print_config(worker->context, &ucp_ep_config(ep)->key, str,
                             addr_indices, UCS_LOG_LEVEL_DEBUG);

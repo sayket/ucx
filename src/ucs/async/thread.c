@@ -191,7 +191,7 @@ static ucs_status_t ucs_async_thread_start(ucs_async_thread_t **thread_p)
         status = UCS_ERR_IO_ERROR;
         goto err_close_epfd;
     }
-
+    
     ret = pthread_create(&thread->thread_id, NULL, ucs_async_thread_func, thread);
     if (ret != 0) {
         ucs_error("pthread_create() returned %d: %m", ret);

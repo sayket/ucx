@@ -125,7 +125,7 @@ ucs_log_default_handler(const char *file, unsigned line, const char *function,
                 ucs_log_get_thread_num(), short_file, line, "UCX",
                 ucs_log_level_names[level], buf);
     } else {
-        fprintf(stdout,
+        fprintf(stderr,
                 "[%lu.%06lu] %16s:%-4u %-4s %-5s %s\n",
                 tv.tv_sec, tv.tv_usec, short_file, line,
                 "UCX", ucs_log_level_names[level], buf);
@@ -314,7 +314,7 @@ void ucs_log_init()
     ucs_log_initialized = 1; /* Set this to 1 immediately to avoid infinite recursion */
 
     strcpy(ucs_log_hostname, ucs_get_host_name());
-    ucs_log_file       = stdout;
+    ucs_log_file       = stderr;
     ucs_log_file_close = 0;
 
     ucs_log_push_handler(ucs_log_default_handler);
