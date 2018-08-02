@@ -207,7 +207,7 @@ UCS_CLASS_INIT_FUNC(uct_ugni_ep_t, uct_iface_t *tl_iface,
                   gni_err_str[ugni_rc], ugni_rc);
         return UCS_ERR_NO_DEVICE;
     }
-    ucs_warn("addr : %p ", addr);
+    
     if(NULL != addr){
         rc = ugni_connect_ep(iface, ugni_dev_addr, iface_addr, self);
     }

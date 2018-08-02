@@ -12,6 +12,8 @@
 
 #define UCT_UGNI_UDT_TL_NAME "ugni_udt"
 
+#define uct_ugni_udt_can_send(_ep) ((uct_ugni_ep_can_send(&_ep->super)) && (_ep->posted_desc == NULL))
+
 static ucs_config_field_t uct_ugni_udt_iface_config_table[] = {
     {"", "ALLOC=huge,thp,mmap,heap", NULL,
     ucs_offsetof(uct_ugni_iface_config_t, super),
@@ -87,11 +89,10 @@ static ucs_status_t recieve_datagram(uct_ugni_udt_iface_t *iface, uint64_t id, u
 
     header = uct_ugni_udt_get_rheader(desc, iface);
 
-    ucs_warn("Got datagram id: %lu type: %i len: %i am_id: %i", id, header->type, header->length, header->am_id);
+    ucs_trace("Got datagram id: %lu type: %i len: %i am_id: %i", id, header->type, header->length, header->am_id);
 
     if (UCT_UGNI_UDT_PAYLOAD != header->type) {
         /* ack message, no data */
-        ucs_warn("got an ack and am clearing "); 
         ucs_assert_always(NULL != ep);
         ucs_mpool_put(ep->posted_desc);
         uct_ugni_check_flush(ep->desc_flush_group);
@@ -101,8 +102,6 @@ static ucs_status_t recieve_datagram(uct_ugni_udt_iface_t *iface, uint64_t id, u
 
     return UCS_INPROGRESS;
 }
-
-void uct_ugni_proccess_datagram_pipe(int event_id, void *arg);
 
 static void *uct_ugni_udt_device_thread(void *arg)
 {
@@ -129,9 +128,8 @@ static void *uct_ugni_udt_device_thread(void *arg)
             break;
         }
         iface->events_ready = 1;
-        ucs_warn("Recieved a new datagram");
+        ucs_trace("Recieved a new datagram");
         ucs_async_pipe_push(&iface->event_pipe);
-        uct_ugni_proccess_datagram_pipe(0, (void *)iface);
     }
 
     return NULL;
@@ -213,8 +211,9 @@ void uct_ugni_proccess_datagram_pipe(int event_id, void *arg) {
         status = recieve_datagram(iface, id, &ep);
         if (UCS_INPROGRESS == status) {
             if (ep != NULL){
-                ucs_warn("Processing reply");
+                ucs_trace("Processing reply");
                 datagram = ep->posted_desc;
+                ep->posted_desc = NULL;
                 status = processs_datagram(iface, datagram);
                 if (UCS_OK != status) {
                     user_desc = uct_ugni_udt_get_user_desc(datagram, iface);
@@ -222,11 +221,9 @@ void uct_ugni_proccess_datagram_pipe(int event_id, void *arg) {
                 } else {
                     ucs_mpool_put(datagram);
                 }
-                ep->posted_desc = NULL;
                 uct_ugni_check_flush(ep->desc_flush_group);
-                ucs_warn("done processing reply ");
             } else {
-                ucs_warn("Processing wildcard");
+                ucs_trace("Processing wildcard");
                 datagram = iface->desc_any;
                 status = processs_datagram(iface, datagram);
                 if (UCS_OK != status) {
@@ -247,12 +244,13 @@ void uct_ugni_proccess_datagram_pipe(int event_id, void *arg) {
         ugni_rc = GNI_PostDataProbeById(uct_ugni_udt_iface_nic_handle(iface), &id);
         uct_ugni_cdm_unlock(&iface->super.cdm);
     }
-
+    
     ucs_async_pipe_drain(&iface->event_pipe);
     pthread_mutex_lock(&iface->device_lock);
+    
     iface->events_ready = 0;
     pthread_mutex_unlock(&iface->device_lock);
-    ucs_warn("Signaling device thread to resume monitoring");
+    ucs_trace("Signaling device thread to resume monitoring");
     pthread_cond_signal(&iface->device_condition);
 
 }
@@ -441,13 +439,13 @@ static UCS_CLASS_INIT_FUNC(uct_ugni_udt_iface_t, uct_md_h md, uct_worker_h worke
         ucs_error("Failed to post wildcard request");
         goto clean_any_desc;
     }
-    /*
+    
     status = ucs_async_set_event_handler(self->super.super.worker->async->mode,
                                          ucs_async_pipe_rfd(&self->event_pipe),
                                          POLLIN,
                                          uct_ugni_proccess_datagram_pipe,
                                          self, self->super.super.worker->async);
-    */                           
+                               
     if (UCS_OK != status) {
         goto clean_cancel_desc;
     }

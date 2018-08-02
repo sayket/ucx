@@ -185,6 +185,10 @@ typedef struct ucp_worker {
     ucs_list_link_t               stream_ready_eps; /* List of EPs with received stream data */
     ucs_list_link_t               all_eps;       /* List of all endpoints */
     ucs_list_link_t               wireup_list;             
+    int                           progressing_wireup;
+    pthread_mutex_t               wireup_lock;
+    pthread_cond_t                wireup_cond;    
+
     ucp_ep_match_ctx_t            ep_match_ctx;  /* Endpoint-to-endpoint matching context */
     ucp_worker_iface_t            *ifaces;       /* Array of interfaces, one for each resource */
     ucs_mpool_t                   am_mp;         /* Memory pool for AM receives */

@@ -73,16 +73,19 @@ typedef struct ucp_wireup_msg {
     uint8_t                 tli[UCP_MAX_LANES];
     uint8_t                 num_msgs;
     uint8_t                 my_msg;
+    uint32_t                msg_id;
     size_t                  total_len;
     /* packed addresses follow */
 } UCS_S_PACKED ucp_wireup_msg_t;
 
 typedef struct ucp_wireup_am_unfinished {
    uintptr_t             src_ep_ptr;
+   uintptr_t             dest_ep_ptr;
    uint64_t              length;
    void                 *next;
    ucp_wireup_msg_t     *buffer;
    ucs_list_link_t       list_link;
+   uint32_t              msg_id;
 } ucp_wireup_am_unfinished_t;
 
 ucs_status_t ucp_wireup_send_request(ucp_ep_h ep);

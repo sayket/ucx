@@ -217,13 +217,13 @@ ssize_t uct_ugni_udt_ep_am_bcopy(uct_ep_h tl_ep, uint8_t id,
     uct_ugni_udt_iface_t *iface = ucs_derived_of(tl_ep->iface, uct_ugni_udt_iface_t);
     uct_ugni_udt_ep_t *ep = ucs_derived_of(tl_ep, uct_ugni_udt_ep_t);
 
-    UCS_ASYNC_BLOCK(iface->super.super.worker->async);
+    //UCS_ASYNC_BLOCK(iface->super.super.worker->async);
 
     ucs_trace_data("AM_BCOPY [%p] am_id: %d buf=%p",
                    iface, id, arg );
     ucs_status_t status = uct_ugni_udt_ep_am_common_send(UCT_UGNI_UDT_AM_BCOPY, ep, iface, id, 0,
                                                          0, NULL, pack_cb, arg);
-    UCS_ASYNC_UNBLOCK(iface->super.super.worker->async);
+    //UCS_ASYNC_UNBLOCK(iface->super.super.worker->async);
 
     return status;
 }

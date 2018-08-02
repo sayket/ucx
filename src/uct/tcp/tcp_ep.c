@@ -93,7 +93,6 @@ static UCS_CLASS_CLEANUP_FUNC(uct_tcp_ep_t)
 {
     uct_tcp_iface_t *iface = ucs_derived_of(self->super.super.iface,
                                             uct_tcp_iface_t);
-
     ucs_debug("tcp_ep %p: destroying", self);
 
     UCS_ASYNC_BLOCK(iface->super.worker->async);

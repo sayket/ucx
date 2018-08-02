@@ -1293,9 +1293,13 @@ ucs_status_t ucp_worker_create(ucp_context_h context,
     if (status != UCS_OK) {
         goto err_close_ifaces;
     }
-
+    
     /* Select atomic resources */
     ucp_worker_init_atomic_tls(worker);
+
+    /* Set up mutex and cond var for wireup w/ multi msg */
+    pthread_mutex_init(&worker->wireup_lock, NULL);
+    pthread_cond_init(&worker->wireup_cond, NULL);
 
     *worker_p = worker;
     return UCS_OK;

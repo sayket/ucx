@@ -278,7 +278,6 @@ ucs_status_t ucp_ep_init_create_wireup(ucp_ep_h ep,
     key.rma_bw_lanes[0]       = 0;
     key.amo_lanes[0]          = 0;
     
-    ucs_warn("calling in create wireup");
     ep->cfg_index             = ucp_worker_get_ep_config(ep->worker, &key);
     ep->am_lane               = 0;
     ep->flags                |= UCP_EP_FLAG_CONNECT_REQ_QUEUED;

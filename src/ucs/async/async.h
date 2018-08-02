@@ -84,7 +84,6 @@ static inline int ucs_async_check_miss(ucs_async_context_t *async)
     return 0;
 }
 
-
 /**
  * Block the async handler (if its currently running, wait until it exits and
  * block it then). Used to serialize accesses with the async handler.
@@ -119,8 +118,6 @@ static inline int ucs_async_check_miss(ucs_async_context_t *async)
             --(_async)->poll_block; \
         } \
     } while (0)
-
-
 END_C_DECLS
 
 #endif
