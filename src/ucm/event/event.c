@@ -391,6 +391,33 @@ void *ucm_sbrk(intptr_t increment)
     return event.sbrk.result;
 }
 
+int ucm_brk(void *addr)
+{
+    void *old_addr     = ucm_orig_sbrk(0);
+    intptr_t increment = (intptr_t)addr - (intptr_t)old_addr;
+    ucm_event_t event;
+
+    ucm_event_enter();
+
+    ucm_trace("ucm_brk(addr=%p)", addr);
+
+    if (increment < 0) {
+        ucm_dispatch_vm_munmap(old_addr, -increment);
+    }
+
+    event.sbrk.result    = (void*)-1;
+    event.sbrk.increment = increment;
+    ucm_event_dispatch(UCM_EVENT_SBRK, &event);
+
+    if ((increment > 0) && (event.sbrk.result != MAP_FAILED)) {
+        ucm_dispatch_vm_mmap(old_addr, increment);
+    }
+
+    ucm_event_leave();
+
+    return event.sbrk.result == MAP_FAILED ? -1 : 0;
+}
+
 int ucm_madvise(void *addr, size_t length, int advice)
 {
     ucm_event_t event;
@@ -455,6 +482,10 @@ static void ucm_cudafree_dispatch_events(void *dptr)
     CUdeviceptr pbase;
     size_t psize;
 
+    if (dptr == NULL) {
+        return;
+    }
+
     ret = cuMemGetAddressRange(&pbase, &psize, (CUdeviceptr) dptr);
     if (ret != CUDA_SUCCESS) {
         ucm_warn("cuMemGetAddressRange(devPtr=%p) failed", (void *)dptr);
@@ -462,7 +493,6 @@ static void ucm_cudafree_dispatch_events(void *dptr)
     }
     ucs_assert(dptr == (void *)pbase);
 
-    ucm_dispatch_vm_munmap((void *)dptr, psize);
     ucm_dispatch_mem_type_free((void *)dptr, psize, UCM_MEM_TYPE_CUDA);
 }
 
@@ -733,9 +763,9 @@ static ucs_status_t ucm_event_install(int events)
                          UCM_EVENT_SHMAT | UCM_EVENT_SBRK;
     }
     if (events & UCM_EVENT_VM_UNMAPPED) {
-        native_events |= UCM_EVENT_MUNMAP | UCM_EVENT_MREMAP |
-                         UCM_EVENT_SHMDT | UCM_EVENT_SBRK |
-                         UCM_EVENT_MADVISE;
+        native_events |= UCM_EVENT_MMAP | UCM_EVENT_MUNMAP | UCM_EVENT_MREMAP |
+                         UCM_EVENT_SHMDT | UCM_EVENT_SHMAT |
+                         UCM_EVENT_SBRK | UCM_EVENT_MADVISE;
     }
 
     /* TODO lock */
@@ -758,12 +788,14 @@ static ucs_status_t ucm_event_install(int events)
     ucm_debug("malloc hooks are ready");
 
 #if HAVE_CUDA
-    status = ucm_cudamem_install();
-    if (status != UCS_OK) {
-        ucm_debug("failed to install cudamem events");
-        goto out_unlock;
+    if (events & (UCM_EVENT_MEM_TYPE_ALLOC | UCM_EVENT_MEM_TYPE_FREE)) {
+        status = ucm_cudamem_install();
+        if (status != UCS_OK) {
+            ucm_debug("failed to install cudamem events");
+            goto out_unlock;
+        }
+        ucm_debug("cudaFree hooks are ready");
     }
-    ucm_debug("cudaFree hooks are ready");
 #endif
 
     status = UCS_OK;
@@ -783,8 +815,8 @@ ucs_status_t ucm_set_event_handler(int events, int priority,
         return UCS_ERR_UNSUPPORTED;
     }
 
-    if (!(events & (UCM_EVENT_FLAG_NO_INSTALL | ucm_external_events))) {
-        status = ucm_event_install(events);
+    if (!(events & UCM_EVENT_FLAG_NO_INSTALL) && (events & ~ucm_external_events)) {
+        status = ucm_event_install(events & ~ucm_external_events);
         if (status != UCS_OK) {
             return status;
         }

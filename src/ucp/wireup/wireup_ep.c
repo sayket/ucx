@@ -56,7 +56,7 @@ static unsigned ucp_wireup_ep_progress(void *arg)
 
     /* If we still have pending wireup messages, send them out first */
     if (wireup_ep->pending_count != 0) {
-        goto out;
+        goto out_unblock;
     }
 
     /* If an error happened on the endpoint (but perhaps the deferred error handler,
@@ -66,7 +66,7 @@ static unsigned ucp_wireup_ep_progress(void *arg)
     if (ucp_ep->flags & UCP_EP_FLAG_FAILED) {
         ucs_trace("ep %p: not switching wireup_ep %p to ready state because of error",
                   ucp_ep, wireup_ep);
-        goto out;
+        goto out_unblock;
     }
 
     ucs_trace("ep %p: switching wireup_ep %p to ready state", ucp_ep, wireup_ep);
@@ -83,15 +83,19 @@ static unsigned ucp_wireup_ep_progress(void *arg)
     ucp_proxy_ep_replace(&wireup_ep->super);
     wireup_ep = NULL;
 
+    UCS_ASYNC_UNBLOCK(&ucp_ep->worker->async);
+
     /* Replay pending requests */
     ucs_queue_for_each_extract(uct_req, &tmp_pending_queue, priv, 1) {
         req = ucs_container_of(uct_req, ucp_request_t, send.uct);
         ucs_assert(req->send.ep == ucp_ep);
         ucp_request_send(req);
-        --ucp_ep->worker->wireup_pend_count;
+        --ucp_ep->worker->flush_ops_count;
     }
 
-out:
+    return 0;
+
+out_unblock:
     UCS_ASYNC_UNBLOCK(&ucp_ep->worker->async);
     return 0;
 }
@@ -187,7 +191,7 @@ static ucs_status_t ucp_wireup_ep_pending_add(uct_ep_h uct_ep,
         }
     } else {
         ucs_queue_push(&wireup_ep->pending_q, ucp_wireup_ep_req_priv(req));
-        ++ucp_ep->worker->wireup_pend_count;
+        ++ucp_ep->worker->flush_ops_count;
         status = UCS_OK;
     }
 out:
@@ -209,15 +213,17 @@ ucp_wireup_ep_pending_purge(uct_ep_h uct_ep, uct_pending_purge_callback_t cb,
     ucs_queue_for_each_extract(req, &wireup_ep->pending_q, priv, 1) {
         ucp_req = ucs_container_of(req, ucp_request_t, send.uct);
         UCS_ASYNC_BLOCK(&worker->async);
-        --worker->wireup_pend_count;
+        --worker->flush_ops_count;
         UCS_ASYNC_UNBLOCK(&worker->async);
         cb(&ucp_req->send.uct, arg);
     }
 
-    if (wireup_ep->aux_ep != NULL) {
-        uct_ep_pending_purge(wireup_ep->aux_ep,
+    if (wireup_ep->pending_count > 0) {
+        uct_ep_pending_purge(ucp_wireup_ep_get_msg_ep(wireup_ep),
                              ucp_wireup_ep_pending_req_release, arg);
     }
+
+    ucs_assert(wireup_ep->pending_count == 0);
 }
 
 static ssize_t ucp_wireup_ep_am_bcopy(uct_ep_h uct_ep, uint8_t id,
@@ -337,7 +343,7 @@ UCS_CLASS_INIT_FUNC(ucp_wireup_ep_t, ucp_ep_h ucp_ep)
     ucs_queue_head_init(&self->pending_q);
 
     UCS_ASYNC_BLOCK(&ucp_ep->worker->async);
-    ++ucp_ep->worker->wireup_pend_count;
+    ++ucp_ep->worker->flush_ops_count;
     UCS_ASYNC_UNBLOCK(&ucp_ep->worker->async);
 
     ucs_trace("ep %p: created wireup ep %p to %s ", ucp_ep, self,
@@ -365,7 +371,7 @@ static UCS_CLASS_CLEANUP_FUNC(ucp_wireup_ep_t)
     }
 
     UCS_ASYNC_BLOCK(&worker->async);
-    --worker->wireup_pend_count;
+    --worker->flush_ops_count;
     UCS_ASYNC_UNBLOCK(&worker->async);
 }
 
@@ -454,14 +460,10 @@ static ucs_status_t ucp_wireup_ep_pack_sockaddr_aux_tls(ucp_worker_h worker,
     }
 
     if (found_supported_tl) {
-        UCP_THREAD_CS_ENTER_CONDITIONAL(&worker->mt_lock);
-
         status = ucp_address_pack(worker, NULL, tl_bitmap, NULL,
                                   address_length_p, (void**)address_p);
-
-        UCP_THREAD_CS_EXIT_CONDITIONAL(&worker->mt_lock);
     } else {
-        ucs_error("no supported transports found for %s", dev_name);
+        ucs_error("no supported sockaddr auxiliary transports found for %s", dev_name);
         status = UCS_ERR_UNREACHABLE;
     }
 
@@ -485,7 +487,8 @@ ssize_t ucp_wireup_ep_sockaddr_fill_private_data(void *arg, const char *dev_name
     uint64_t tl_bitmap;
     char aux_tls_str[64];
 
-    status = ucp_worker_get_address(worker, &worker_address, &address_length);
+    status = ucp_address_pack(worker, NULL, -1, NULL, &address_length,
+                              (void**)&worker_address);
     if (status != UCS_OK) {
         goto err;
     }

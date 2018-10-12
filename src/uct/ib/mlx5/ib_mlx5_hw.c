@@ -193,10 +193,12 @@ unsigned uct_ib_mlx5_get_cq_ci(struct ibv_cq *cq)
     return mcq->cons_index;
 }
 
+#if !HAVE_DECL_MLX5DV_OBJ_AH
 void uct_ib_mlx5_get_av(struct ibv_ah *ah, struct mlx5_wqe_av *av)
 {
     memcpy(av, &ucs_container_of(ah, struct mlx5_ah, ibv_ah)->av, sizeof(*av));
 }
+#endif
 
 struct ibv_qp *uct_dv_get_cmd_qp(struct ibv_srq *srq)
 {
@@ -219,11 +221,18 @@ struct ibv_qp *uct_dv_get_cmd_qp(struct ibv_srq *srq)
 #endif
 }
 
-void uct_ib_mlx5_cq_set_flags(struct ibv_cq *cq, int v)
+struct mlx5_uar_data {
+    enum { __DUMMY }            map_type;
+    void                        *regs;
+};
+
+void *uct_dv_get_info_uar0(void *uar)
 {
-#if HAVE_STRUCT_MLX5_CQ_MODEL_FLAGS
-    struct mlx5_cq *mcq = ucs_container_of(cq, struct mlx5_cq, ibv_cq);
-    mcq->model_flags = v;
+#if HAVE_DECL_MLX5DV_INIT_OBJ
+    struct mlx5_uar_data *muar = uar;
+    return muar[0].regs;
+#else
+    return NULL;
 #endif
 }
 

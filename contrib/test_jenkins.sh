@@ -446,12 +446,17 @@ run_ucp_hello() {
 # Compile and run UCT hello world example
 #
 run_uct_hello() {
-	for ucx_dev in $(get_active_ib_devices)
+	for send_func in -i -b -z
 	do
-		for send_func in -i -b -z
+		for ucx_dev in $(get_active_ib_devices)
 		do
-			echo "==== Running UCT hello world server on ${ucx_dev} with sending ${send_func} ===="
-			run_hello uct  -d ${ucx_dev} -t "rc"
+			echo "==== Running UCT hello world server on rc/${ucx_dev} with sending ${send_func} ===="
+			run_hello uct  -d ${ucx_dev} -t "rc" ${send_func}
+		done
+		for ucx_dev in $(ip addr | awk '/state UP/ {print $2}' | sed s/://)
+		do
+			echo "==== Running UCT hello world server on tcp/${ucx_dev} with sending ${send_func} ===="
+			run_hello uct -d ${ucx_dev} -t "tcp" ${send_func}
 		done
 	done
 	rm -f ./uct_hello_world
@@ -572,7 +577,7 @@ run_ucx_perftest_mpi() {
 # Test malloc hooks with mpi
 #
 test_malloc_hooks_mpi() {
-	for tname in malloc_hooks external_events flag_no_install
+	for tname in malloc_hooks malloc_hooks_unmapped external_events flag_no_install
 	do
 		echo "==== Running memory hook (${tname}) on MPI ===="
 		$MPIRUN -np 1 $AFFINITY ./test/mpi/test_memhooks -t $tname
@@ -696,7 +701,11 @@ run_coverity() {
 		rc=$(($rc+$nerrors))
 
 		index_html=$(cd $cov_build && find . -name index.html | cut -c 3-)
-		cov_url="$WS_URL/$cov_build_id/${index_html}"
+		if [ -z "$BUILD_URL" ]; then
+			cov_url="${WS_URL}/${cov_build_id}/${index_html}"
+		else
+			cov_url="${BUILD_URL}/artifact/${cov_build_id}/${index_html}"
+		fi
 		rm -f jenkins_sidelinks.txt
 		if [ $nerrors -gt 0 ]; then
 			cov-format-errors --dir $cov_build --emacs-style
@@ -778,9 +787,8 @@ run_gtest() {
 			module load tools/valgrind-latest
 		fi
 
-		export VALGRIND_EXTRA_ARGS="--xml=yes --xml-file=valgrind.xml --child-silent-after-fork=yes"
-		$AFFINITY $TIMEOUT_VALGRIND make -C test/gtest test_valgrind \
-			VALGRIND_EXTRA_ARGS="--gen-suppressions=all"
+		export VALGRIND_EXTRA_ARGS="--xml=yes --xml-file=valgrind.xml --child-silent-after-fork=yes --gen-suppressions=all"
+		$AFFINITY $TIMEOUT_VALGRIND make -C test/gtest test_valgrind
 		(cd test/gtest && rename .tap _vg.tap *.tap && mv *.tap $GTEST_REPORT_DIR)
 		module unload tools/valgrind-latest
 	else

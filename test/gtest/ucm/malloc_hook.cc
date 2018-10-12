@@ -15,10 +15,12 @@
 #include <pthread.h>
 #include <sstream>
 #include <stdint.h>
+#include <dlfcn.h>
 
 extern "C" {
 #include <ucs/time/time.h>
 #include <ucm/malloc/malloc_hook.h>
+#include <ucm/bistro/bistro.h>
 #include <ucs/sys/sys.h>
 #include <malloc.h>
 }
@@ -30,52 +32,59 @@ extern "C" {
 
 class malloc_hook : public ucs::test {
 protected:
-    virtual void init() {
-        size_t free_space, min_free_space, prev_free_space, alloc_size;
-        struct mallinfo mi;
+    static void mem_event_callback(ucm_event_type_t event_type,
+                                   ucm_event_t *event,
+                                   void *arg)
+    {
+        malloc_hook *self = reinterpret_cast<malloc_hook*>(arg);
+        self->m_got_event = 1;
+    }
 
+    virtual void init() {
+        ucs_status_t status;
+
+        m_got_event = 0;
         ucm_malloc_state_reset(128 * 1024, 128 * 1024);
         malloc_trim(0);
-
-        /* Take up free space so we would definitely get mmap events */
-        min_free_space  = SIZE_MAX;
-        alloc_size      = 0;
-        mi = mallinfo();
-        prev_free_space = mi.fsmblks + mi.fordblks;
-
-        while (alloc_size < (size_t)(prev_free_space * 0.90)) {
-            m_pts.push_back(malloc(small_alloc_size));
-            alloc_size += small_alloc_size;
-        }
+        status = ucm_set_event_handler(UCM_EVENT_VM_MAPPED,
+                                       0, mem_event_callback,
+                                       reinterpret_cast<void*>(this));
+        ASSERT_UCS_OK(status);
 
         for (;;) {
             void *ptr = malloc(small_alloc_size);
-            mi = mallinfo();
-            free_space = mi.fsmblks + mi.fordblks;
-            if (free_space > min_free_space) {
+            if (m_got_event) {
                 /* If the heap grew, the minimal size is the previous one */
                 free(ptr);
-                min_free_space = free_space;
                 break;
             } else {
                 m_pts.push_back(ptr);
-                alloc_size += small_alloc_size;
-                min_free_space = free_space;
             }
         }
-
-        UCS_TEST_MESSAGE << "Reduced heap free space from " << prev_free_space <<
-                            " to " << free_space << " after allocating " <<
-                            alloc_size << " bytes";
+        ucm_unset_event_handler(UCM_EVENT_VM_MAPPED, mem_event_callback,
+                                reinterpret_cast<void*>(this));
     }
+
+    static int bistro_munmap_hook(void *addr, size_t length)
+    {
+        UCM_BISTRO_PROLOGUE;
+        bistro_call_counter++;
+        int res = (intptr_t)syscall(SYS_munmap, addr, length);
+        UCM_BISTRO_EPILOGUE;
+        return res;
+    }
+
 
 public:
     static int            small_alloc_count;
-    static const size_t   small_alloc_size  = 10000;
+    static const size_t   small_alloc_size = 10000;
     ucs::ptr_vector<void> m_pts;
+    int                   m_got_event;
+    static volatile int   bistro_call_counter;
 };
 
-int malloc_hook::small_alloc_count = 1000 / ucs::test_time_multiplier();
+int malloc_hook::small_alloc_count            = 1000 / ucs::test_time_multiplier();
+volatile int malloc_hook::bistro_call_counter = 0;
 
 class test_thread {
 public:
@@ -732,4 +741,61 @@ UCS_TEST_F(malloc_hook_cplusplus, remap_override) {
     }
 
     unset();
+}
+
+typedef int (munmap_f_t)(void *addr, size_t len);
+
+UCS_TEST_F(malloc_hook, bistro_patch) {
+    const char *symbol = "munmap";
+    ucm_bistro_restore_point_t *rp = NULL;
+    ucs_status_t status;
+    munmap_f_t *munmap_f;
+    void *ptr;
+    int res;
+    uint64_t UCS_V_UNUSED patched;
+    uint64_t UCS_V_UNUSED origin;
+
+    if (RUNNING_ON_VALGRIND) {
+        UCS_TEST_SKIP_R("skipping on valgrind");
+    }
+
+    /* set hook to mmap call */
+    status = ucm_bistro_patch(symbol, (void*)bistro_munmap_hook, &rp);
+    ASSERT_UCS_OK(status);
+    EXPECT_NE((intptr_t)rp, NULL);
+
+    munmap_f = (munmap_f_t*)ucm_bistro_restore_addr(rp);
+    EXPECT_NE((intptr_t)munmap_f, NULL);
+
+    /* save partial body of patched function */
+    patched = *(uint64_t*)munmap_f;
+
+    bistro_call_counter = 0;
+    ptr = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+    EXPECT_NE(ptr, MAP_FAILED);
+
+    /* try to call munmap, we should jump into munmap_hook instead */
+    res = munmap_f(ptr, 4096);
+    EXPECT_EQ(res, 0);
+    /* due to cache coherency issues on ARM systems could be executed
+     * original function body, so, skip counter evaluation */
+    EXPECT_GT(bistro_call_counter, 0);
+
+    /* restore original mmap body */
+    status = ucm_bistro_restore(rp);
+    ASSERT_UCS_OK(status);
+
+    bistro_call_counter = 0;
+    /* now try to call mmap, we should NOT jump into mmap_hook */
+    ptr = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+    EXPECT_NE(ptr, MAP_FAILED);
+    res = munmap_f(ptr, 4096);
+    EXPECT_EQ(res, 0);
+    EXPECT_EQ(bistro_call_counter, 0);  /* hook is not called */
+    /* save partial body of restored function */
+    origin = *(uint64_t*)munmap_f;
+
+#if !defined (__powerpc64__)
+    EXPECT_NE(patched, origin);
+#endif
 }

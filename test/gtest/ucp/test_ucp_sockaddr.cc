@@ -23,6 +23,10 @@
          * and skipped */
 
 class test_ucp_sockaddr : public ucp_test {
+    enum {
+        MT_PARAM_VARIANT = DEFAULT_PARAM_VARIANT + 1
+    };
+
 public:
     static ucp_params_t get_ctx_params() {
         ucp_params_t params = ucp_test::get_ctx_params();
@@ -31,10 +35,23 @@ public:
         return params;
     }
 
+    static std::vector<ucp_test_param> enum_test_params(const ucp_params_t& ctx_params,
+                                                        const std::string& name,
+                                                        const std::string& test_case_name,
+                                                        const std::string& tls)
+    {
+        std::vector<ucp_test_param> result =
+                ucp_test::enum_test_params(ctx_params, name, test_case_name, tls);
+
+        generate_test_params_variant(ctx_params, name, test_case_name, tls,
+                                     MT_PARAM_VARIANT, result,
+                                     MULTI_THREAD_WORKER);
+        return result;
+    }
+
     void init()
     {
         test_base::init();
-        ucp_ep_params_t ep_params = ucp_test::get_ep_params();
 
         /* create dummy sender and receiver entities */
         create_entity();
@@ -44,7 +61,7 @@ public:
          * can support the requested features from ucp_params.
          * regular flow is used here (not client-server) */
         wrap_errors();
-        sender().connect(&receiver(), ep_params, 0, 0);
+        sender().connect(&receiver(), get_ep_params(), 0, 0);
         restore_errors();
 
         /* remove the dummy sender and receiver entities */
@@ -59,7 +76,7 @@ public:
     {
         if (level == UCS_LOG_LEVEL_ERROR) {
             std::string err_str = format_message(message, ap);
-            if ((strstr(err_str.c_str(), "no supported transports found for")) ||
+            if ((strstr(err_str.c_str(), "no supported sockaddr auxiliary transports found for")) ||
                 (strstr(err_str.c_str(), "sockaddr aux resources addresses")) ||
                 (strstr(err_str.c_str(), "no peer failure handler")) ||
                 /* when the "peer failure" error happens, it is followed by: */
@@ -229,12 +246,10 @@ public:
         }
     }
 
-    void client_ep_connect(struct sockaddr *connect_addr)
+    virtual ucp_ep_params_t get_ep_params()
     {
         ucp_ep_params_t ep_params = ucp_test::get_ep_params();
-        ep_params.field_mask      |= UCP_EP_PARAM_FIELD_FLAGS |
-                                     UCP_EP_PARAM_FIELD_SOCK_ADDR |
-                                     UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
+        ep_params.field_mask      |= UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
                                      UCP_EP_PARAM_FIELD_ERR_HANDLER |
                                      UCP_EP_PARAM_FIELD_USER_DATA;
         /* The error handling requirement is needed since we need to take
@@ -244,6 +259,14 @@ public:
         ep_params.err_handler.cb   = err_handler_cb;
         ep_params.err_handler.arg  = NULL;
         ep_params.user_data        = reinterpret_cast<void*>(this);
+        return ep_params;
+    }
+
+    void client_ep_connect(struct sockaddr *connect_addr)
+    {
+        ucp_ep_params_t ep_params = get_ep_params();
+        ep_params.field_mask      |= UCP_EP_PARAM_FIELD_FLAGS |
+                                     UCP_EP_PARAM_FIELD_SOCK_ADDR;
         ep_params.flags            = UCP_EP_PARAMS_FLAGS_CLIENT_SERVER;
         ep_params.sockaddr.addr    = connect_addr;
         ep_params.sockaddr.addrlen = sizeof(*connect_addr);
@@ -390,9 +413,9 @@ UCS_TEST_P(test_ucp_sockaddr_with_rma_atomic, wireup_for_rma_atomic) {
                         "matching transport");
     }
     EXPECT_EQ(0, err_handler_count);
-    restore_errors();
 
     wait_for_server_ep(false);
+    restore_errors();
 
     /* allow the connection establishment flow to complete */
     short_progress_loop();

@@ -30,7 +30,7 @@ static void ucp_stream_send_req_init(ucp_request_t* req, ucp_ep_h ep,
 {
     req->flags             = flags;
     req->send.ep           = ep;
-    req->send.buffer       = buffer;
+    req->send.buffer       = (void*)buffer;
     req->send.datatype     = datatype;
     req->send.mem_type     = UCT_MD_MEM_TYPE_HOST;
     req->send.lane         = ep->am_lane;
@@ -86,7 +86,7 @@ UCS_PROFILE_FUNC(ucs_status_ptr_t, ucp_stream_send_nb,
     ucs_status_t     status;
     ucs_status_ptr_t ret;
 
-    UCP_THREAD_CS_ENTER_CONDITIONAL(&ep->worker->mt_lock);
+    UCP_WORKER_THREAD_CS_ENTER_CONDITIONAL(ep->worker);
 
     ucs_trace_req("stream_send_nb buffer %p count %zu to %s cb %p flags %u",
                   buffer, count, ucp_ep_peer_name(ep), cb, flags);
@@ -127,7 +127,7 @@ UCS_PROFILE_FUNC(ucs_status_ptr_t, ucp_stream_send_nb,
                               ucp_ep_config(ep)->stream.proto);
 
 out:
-    UCP_THREAD_CS_EXIT_CONDITIONAL(&ep->worker->mt_lock);
+    UCP_WORKER_THREAD_CS_EXIT_CONDITIONAL(ep->worker);
     return ret;
 }
 

@@ -22,6 +22,9 @@ typedef enum ucs_cpu_model {
     UCS_CPU_MODEL_INTEL_SANDYBRIDGE,
     UCS_CPU_MODEL_INTEL_NEHALEM,
     UCS_CPU_MODEL_INTEL_WESTMERE,
+    UCS_CPU_MODEL_INTEL_HASWELL,
+    UCS_CPU_MODEL_INTEL_BROADWELL,
+    UCS_CPU_MODEL_INTEL_SKYLAKE,
     UCS_CPU_MODEL_ARM_AARCH64,
     UCS_CPU_MODEL_LAST
 } ucs_cpu_model_t;
@@ -66,4 +69,22 @@ typedef enum ucs_cpu_flag {
 #define UCS_SYS_CACHE_LINE_SIZE    UCS_ARCH_CACHE_LINE_SIZE
 #endif
 
+/**
+ * Clear processor data and instruction caches, intended for
+ * self-modifying code.
+ *
+ * @start start of region to clear cache, including address
+ * @end   end of region to clear cache, excluding address
+ */
+static inline void ucs_clear_cache(void *start, void *end)
+{
+#if HAVE___CLEAR_CACHE
+    /* do not allow global declaration of compiler intrinsic */
+    void __clear_cache(void* beg, void* end);
+
+    __clear_cache(start, end);
+#else
+    ucs_arch_clear_cache(start, end);
+#endif
+}
 #endif

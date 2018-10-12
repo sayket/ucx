@@ -1065,8 +1065,8 @@ static uct_dc_iface_ops_t uct_dc_verbs_iface_ops = {
     .iface_is_reachable       = uct_dc_iface_is_reachable,
     .iface_get_address        = uct_dc_iface_get_address
     },
-    .arm_tx_cq                = uct_ib_iface_arm_tx_cq,
-    .arm_rx_cq                = uct_ib_iface_arm_rx_cq,
+    .arm_cq                   = uct_ib_iface_arm_cq,
+    .event_cq                 = (void*)ucs_empty_function,
     .handle_failure           = uct_dc_verbs_handle_failure,
     .set_ep_failed            = uct_dc_verbs_ep_set_failed
     },
@@ -1101,6 +1101,7 @@ static UCS_CLASS_INIT_FUNC(uct_dc_verbs_iface_t, uct_md_h md, uct_worker_h worke
 {
     uct_dc_verbs_iface_config_t *config = ucs_derived_of(tl_config,
                                                          uct_dc_verbs_iface_config_t);
+    uct_ib_iface_init_attr_t init_attr = {};
     struct ibv_qp_init_attr dci_init_attr;
     struct ibv_qp_attr dci_attr;
     ucs_status_t status;
@@ -1109,10 +1110,11 @@ static UCS_CLASS_INIT_FUNC(uct_dc_verbs_iface_t, uct_md_h md, uct_worker_h worke
 
     ucs_trace_func("");
 
+    init_attr.res_domain_key = UCT_IB_IFACE_NULL_RES_DOMAIN_KEY;
+    init_attr.tm_cap_bit     = IBV_EXP_TM_CAP_DC;
+
     UCS_CLASS_CALL_SUPER_INIT(uct_dc_iface_t, &uct_dc_verbs_iface_ops, md,
-                              worker, params, 0, &config->super,
-                              IBV_EXP_TM_CAP_DC,
-                              UCT_IB_IFACE_NULL_RES_DOMAIN_KEY);
+                              worker, params, &config->super, &init_attr);
 
     uct_dc_verbs_iface_init_wrs(self);
 

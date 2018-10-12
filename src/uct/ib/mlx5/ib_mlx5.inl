@@ -200,8 +200,10 @@ uct_ib_mlx5_set_dgram_seg(struct mlx5_wqe_datagram_seg *seg,
 {
     if (qp_type == IBV_QPT_UD) {
         mlx5_av_base(&seg->av)->key.qkey.qkey  = htonl(UCT_IB_KEY);
+#if HAVE_TL_DC
     } else if (qp_type == IBV_EXP_QPT_DC_INI) {
         mlx5_av_base(&seg->av)->key.dc_key     = htobe64(UCT_IB_KEY);
+#endif
     }
     mlx5_av_base(&seg->av)->dqp_dct            = av->dqp_dct;
     mlx5_av_base(&seg->av)->stat_rate_sl       = av->stat_rate_sl;
@@ -355,11 +357,11 @@ static UCS_F_ALWAYS_INLINE void uct_ib_mlx5_bf_copy_bb(void * restrict dst,
                                                        void * restrict src)
 {
 #if defined( __SSE4_2__)
-        UCS_WORD_COPY(dst, src, __m128i, MLX5_SEND_WQE_BB);
+    UCS_WORD_COPY(__m128i, dst, __m128i, src, MLX5_SEND_WQE_BB);
 #elif defined(__ARM_NEON)
-        UCS_WORD_COPY(dst, src, int16x8_t, MLX5_SEND_WQE_BB);
+    UCS_WORD_COPY(int16x8_t, dst, int16x8_t, src, MLX5_SEND_WQE_BB);
 #else /* NO SIMD support */
-        UCS_WORD_COPY(dst, src, uint64_t, MLX5_SEND_WQE_BB);
+    UCS_WORD_COPY(uint64_t, dst, uint64_t, src, MLX5_SEND_WQE_BB);
 #endif
 }
 

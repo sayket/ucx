@@ -122,7 +122,7 @@ ucp_tag_send_req_init(ucp_request_t* req, ucp_ep_h ep, const void* buffer,
 {
     req->flags             = flags;
     req->send.ep           = ep;
-    req->send.buffer       = buffer;
+    req->send.buffer       = (void*)buffer;
     req->send.datatype     = datatype;
     req->send.tag.tag      = tag;
     req->send.type         = UCP_REQUEST_TYPE_SEND_TAG;
@@ -179,7 +179,7 @@ UCS_PROFILE_FUNC(ucs_status_ptr_t, ucp_tag_send_nb,
     ucp_request_t *req;
     ucs_status_ptr_t ret;
 
-    UCP_THREAD_CS_ENTER_CONDITIONAL(&ep->worker->mt_lock);
+    UCP_WORKER_THREAD_CS_ENTER_CONDITIONAL(ep->worker);
 
     ucs_trace_req("send_nb buffer %p count %zu tag %"PRIx64" to %s cb %p",
                   buffer, count, tag, ucp_ep_peer_name(ep), cb);
@@ -204,7 +204,7 @@ UCS_PROFILE_FUNC(ucs_status_ptr_t, ucp_tag_send_nb,
                            ucp_ep_config(ep)->tag.rndv.am_thresh,
                            cb, ucp_ep_config(ep)->tag.proto, 1);
 out:
-    UCP_THREAD_CS_EXIT_CONDITIONAL(&ep->worker->mt_lock);
+    UCP_WORKER_THREAD_CS_EXIT_CONDITIONAL(ep->worker);
     return ret;
 }
 
@@ -217,7 +217,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_tag_send_nbr,
     ucs_status_t status;
     ucs_status_ptr_t ret;
 
-    UCP_THREAD_CS_ENTER_CONDITIONAL(&ep->worker->mt_lock);
+    UCP_WORKER_THREAD_CS_ENTER_CONDITIONAL(ep->worker);
 
     ucs_trace_req("send_nbr buffer %p count %zu tag %"PRIx64" to %s req %p",
                   buffer, count, tag, ucp_ep_peer_name(ep), request);
@@ -225,7 +225,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_tag_send_nbr,
     status = UCS_PROFILE_CALL(ucp_tag_send_inline, ep, buffer, count,
                               datatype, tag);
     if (ucs_likely(status != UCS_ERR_NO_RESOURCE)) {
-        UCP_THREAD_CS_EXIT_CONDITIONAL(&ep->worker->mt_lock);
+        UCP_WORKER_THREAD_CS_EXIT_CONDITIONAL(ep->worker);
         return status;
     }
 
@@ -236,7 +236,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_tag_send_nbr,
                            ucp_ep_config(ep)->tag.rndv_send_nbr.am_thresh,
                            NULL, ucp_ep_config(ep)->tag.proto, 0);
 
-    UCP_THREAD_CS_EXIT_CONDITIONAL(&ep->worker->mt_lock);
+    UCP_WORKER_THREAD_CS_EXIT_CONDITIONAL(ep->worker);
 
     if (ucs_unlikely(UCS_PTR_IS_ERR(ret))) {
         return UCS_PTR_STATUS(ret);
@@ -253,7 +253,7 @@ UCS_PROFILE_FUNC(ucs_status_ptr_t, ucp_tag_send_sync_nb,
     ucs_status_ptr_t ret;
     ucs_status_t status;
 
-    UCP_THREAD_CS_ENTER_CONDITIONAL(&ep->worker->mt_lock);
+    UCP_WORKER_THREAD_CS_ENTER_CONDITIONAL(ep->worker);
 
     ucs_trace_req("send_sync_nb buffer %p count %zu tag %"PRIx64" to %s cb %p",
                   buffer, count, tag, ucp_ep_peer_name(ep), cb);
@@ -283,6 +283,6 @@ UCS_PROFILE_FUNC(ucs_status_ptr_t, ucp_tag_send_sync_nb,
                            ucp_ep_config(ep)->tag.rndv.am_thresh,
                            cb, ucp_ep_config(ep)->tag.sync_proto, 1);
 out:
-    UCP_THREAD_CS_EXIT_CONDITIONAL(&ep->worker->mt_lock);
+    UCP_WORKER_THREAD_CS_EXIT_CONDITIONAL(ep->worker);
     return ret;
 }

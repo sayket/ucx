@@ -142,7 +142,7 @@ noinst_HEADERS += \
 	ib/ud/base/ud_inl.h \
 	ib/ud/verbs/ud_verbs.h 
 
-if HAVE_MLX5_HW
+if HAVE_MLX5_HW_UD
 noinst_HEADERS += \
 	ib/ud/accel/ud_mlx5_common.h \
 	ib/ud/accel/ud_mlx5.h
@@ -241,16 +241,21 @@ libuct_la_SOURCES += \
 noinst_HEADERS += \
     cuda/cuda_ipc/cuda_ipc_md.h \
     cuda/cuda_ipc/cuda_ipc_iface.h \
-    cuda/cuda_ipc/cuda_ipc_ep.h
+    cuda/cuda_ipc/cuda_ipc_ep.h \
+    cuda/cuda_ipc/cuda_ipc_cache.h
 
 libuct_la_SOURCES += \
     cuda/cuda_ipc/cuda_ipc_md.c \
     cuda/cuda_ipc/cuda_ipc_iface.c \
-    cuda/cuda_ipc/cuda_ipc_ep.c
+    cuda/cuda_ipc/cuda_ipc_ep.c \
+    cuda/cuda_ipc/cuda_ipc_cache.c
 
 endif
 
 if HAVE_ROCM
+libuct_la_CPPFLAGS += $(ROCM_CPPFLAGS)
+libuct_la_LDFLAGS +=  $(ROCM_LDFLAGS) $(ROCM_LIBS)
+
 noinst_HEADERS += \
     rocm/rocm_cma_md.h \
     rocm/rocm_cma_iface.h \

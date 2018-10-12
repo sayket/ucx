@@ -112,3 +112,21 @@
    ...
    fun:ibv_exp_create_res_domain
 }
+{
+   ibverbs_get_device_list
+   Memcheck:Leak
+   ...
+   fun:ibverbs_get_device_list
+}
+{
+   fix_dereg_mr
+   Memcheck:Cond
+   ...
+   fun:ibv_dereg_mr@@IBVERBS_1.1
+}
+{
+   exp_query_device_cond
+   Memcheck:Cond
+   fun:ibv_exp_cmd_query_device
+}
+

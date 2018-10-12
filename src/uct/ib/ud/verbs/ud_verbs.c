@@ -290,7 +290,7 @@ uct_ud_verbs_iface_poll_tx(uct_ud_verbs_iface_t *iface)
     struct ibv_wc wc;
     int ret;
 
-    ret = ibv_poll_cq(iface->super.super.send_cq, 1, &wc);
+    ret = ibv_poll_cq(iface->super.super.cq[UCT_IB_DIR_TX], 1, &wc);
     if (ucs_unlikely(ret < 0)) {
         ucs_fatal("Failed to poll send CQ");
         return 0;
@@ -319,7 +319,7 @@ uct_ud_verbs_iface_poll_rx(uct_ud_verbs_iface_t *iface, int is_async)
     void *packet;
     int i;
 
-    status = uct_ib_poll_cq(iface->super.super.recv_cq, &num_wcs, wc);
+    status = uct_ib_poll_cq(iface->super.super.cq[UCT_IB_DIR_RX], &num_wcs, wc);
     if (status != UCS_OK) {
         num_wcs = 0;
         goto out;
@@ -520,8 +520,8 @@ static uct_ud_iface_ops_t uct_ud_verbs_iface_ops = {
     .iface_get_address        = uct_ud_iface_get_address,
     .iface_is_reachable       = uct_ib_iface_is_reachable
     },
-    .arm_tx_cq                = uct_ib_iface_arm_tx_cq,
-    .arm_rx_cq                = uct_ib_iface_arm_rx_cq,
+    .arm_cq                   = uct_ib_iface_arm_cq,
+    .event_cq                 = (void*)ucs_empty_function,
     .handle_failure           = uct_ud_iface_handle_failure,
     .set_ep_failed            = uct_ud_verbs_ep_set_failed
     },
@@ -570,13 +570,15 @@ static UCS_CLASS_INIT_FUNC(uct_ud_verbs_iface_t, uct_md_h md, uct_worker_h worke
 {
     uct_ud_iface_config_t *config = ucs_derived_of(tl_config,
                                                    uct_ud_iface_config_t);
+    uct_ib_iface_init_attr_t init_attr = {};
     ucs_status_t status;
 
     ucs_trace_func("");
 
+    init_attr.res_domain_key = UCT_IB_IFACE_NULL_RES_DOMAIN_KEY;
+
     UCS_CLASS_CALL_SUPER_INIT(uct_ud_iface_t, &uct_ud_verbs_iface_ops, md,
-                              worker, params, 0, UCT_IB_IFACE_NULL_RES_DOMAIN_KEY,
-                              config);
+                              worker, params, config, &init_attr);
 
     memset(&self->tx.wr_inl, 0, sizeof(self->tx.wr_inl));
     self->tx.wr_inl.opcode            = IBV_WR_SEND;

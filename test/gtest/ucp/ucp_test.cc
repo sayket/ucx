@@ -296,6 +296,7 @@ bool ucp_test::check_test_param(const std::string& name,
     UCS_TEST_CREATE_HANDLE(ucp_config_t*, config, ucp_config_release,
                            ucp_config_read, NULL, NULL);
     set_ucp_config(config, test_param);
+    ucp_config_modify(config.get(), "WARN_INVARIANT_TSC", "n");
 
     ucp_context_h ucph;
     ucs_status_t status;
@@ -388,7 +389,7 @@ void ucp_test_base::entity::connect(const entity* other,
 
         if (status == UCS_ERR_UNREACHABLE) {
             ucp_worker_release_address(other->worker(i), address);
-            UCS_TEST_SKIP_R(m_errors.empty() ? "" : m_errors.back());
+            UCS_TEST_SKIP_R(m_errors.empty() ? "Unreachable" : m_errors.back());
         }
 
         ASSERT_UCS_OK(status);

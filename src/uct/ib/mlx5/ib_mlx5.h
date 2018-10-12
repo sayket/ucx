@@ -60,6 +60,8 @@
 #define UCT_IB_MLX5_CQE_VENDOR_SYND_ODP 0x93
 #define UCT_IB_MLX5_CQE_OP_OWN_ERR_MASK 0x80
 #define UCT_IB_MLX5_MAX_SEND_WQE_SIZE   (UCT_IB_MLX5_MAX_BB * MLX5_SEND_WQE_BB)
+#define UCT_IB_MLX5_CQ_SET_CI           0
+#define UCT_IB_MLX5_CQ_ARM_DB           1
 
 
 #define UCT_IB_MLX5_OPMOD_EXT_ATOMIC(_log_arg_size) \
@@ -78,8 +80,10 @@
 /* do not use direct cast from address of reserved0 to avoid compilation warnings */
 #  define mlx5_av_grh(_av)          ((struct mlx5_grh_av *)(((char*)(_av)) + \
                                      ucs_offsetof(struct mlx5_wqe_av, reserved0[0])))
-#  define UCT_IB_MLX5_AV_BASE_SIZE  sizeof(struct mlx5_wqe_av)
+#  define UCT_IB_MLX5_AV_BASE_SIZE  ucs_offsetof(struct mlx5_wqe_av, reserved0[0])
 #  define UCT_IB_MLX5_AV_FULL_SIZE  sizeof(struct mlx5_wqe_av)
+
+#  define mlx5_base_av              mlx5_wqe_av
 
 struct mlx5_grh_av {
         uint8_t         reserved0[4];
@@ -131,9 +135,12 @@ typedef struct uct_ib_mlx5_srq {
 typedef struct uct_ib_mlx5_cq {
     void               *cq_buf;
     unsigned           cq_ci;
+    unsigned           cq_sn;
     unsigned           cq_length;
     unsigned           cqe_size_log;
     unsigned           cq_num;
+    void               *uar;
+    volatile uint32_t  *dbrec;
 } uct_ib_mlx5_cq_t;
 
 
@@ -248,6 +255,11 @@ ucs_status_t uct_ib_mlx5_get_cq(struct ibv_cq *cq, uct_ib_mlx5_cq_t *mlx5_cq);
  * Get flag indicating compact AV support.
  */
 ucs_status_t uct_ib_mlx5_get_compact_av(uct_ib_iface_t *iface, int *compact_av);
+
+/**
+ * Requests completion notification.
+ */
+int uct_ib_mlx5dv_arm_cq(uct_ib_mlx5_cq_t *cq, int solicited);
 
 /**
  * Check for completion with error.

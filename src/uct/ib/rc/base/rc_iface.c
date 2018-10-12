@@ -200,6 +200,7 @@ ucs_status_t uct_rc_iface_query(uct_rc_iface_t *iface,
                                               UCS_BIT(UCT_ATOMIC_OP_CSWAP);
     }
 
+#if HAVE_IB_EXT_ATOMICS
     if (uct_ib_atomic_is_supported(dev, 1, sizeof(uint64_t))) {
         /* TODO: remove deprecated flags */
         iface_attr->cap.flags              |= UCT_IFACE_FLAG_ATOMIC_DEVICE;
@@ -216,6 +217,7 @@ ucs_status_t uct_rc_iface_query(uct_rc_iface_t *iface,
                                               UCS_BIT(UCT_ATOMIC_OP_SWAP) |
                                               UCS_BIT(UCT_ATOMIC_OP_CSWAP);
     }
+#endif
 
     iface_attr->cap.put.opt_zcopy_align = UCS_SYS_PCI_MAX_PAYLOAD;
     iface_attr->cap.get.opt_zcopy_align = UCS_SYS_PCI_MAX_PAYLOAD;
@@ -562,15 +564,15 @@ ucs_status_t uct_rc_iface_handle_rndv(uct_rc_iface_t *iface,
 static void uct_rc_iface_preinit(uct_rc_iface_t *iface, uct_md_h md,
                                  const uct_rc_iface_config_t *config,
                                  const uct_iface_params_t *params,
-                                 int tm_cap_flag, unsigned *rx_cq_len,
-                                 size_t *max_bcopy)
+                                 uct_ib_iface_init_attr_t *init_attr)
 {
 #if IBV_EXP_HW_TM
     uct_ib_device_t *dev = &ucs_derived_of(md, uct_ib_md_t)->dev;
     uint32_t cap_flags   = IBV_DEVICE_TM_CAPS(dev, capability_flags);
     struct ibv_exp_tmh tmh;
 
-    iface->tm.enabled = (config->tm.enable && (cap_flags & tm_cap_flag));
+    iface->tm.enabled = config->tm.enable &&
+                        (cap_flags & init_attr->tm_cap_bit);
 
     if (!iface->tm.enabled) {
         goto out_tm_disabled;
@@ -599,15 +601,17 @@ static void uct_rc_iface_preinit(uct_rc_iface_t *iface, uct_md_h md,
      * - up to 3 CQEs for every posted tag: ADD, TM_CONSUMED and MSG_ARRIVED
      * - one SYNC CQE per every IBV_DEVICE_MAX_UNEXP_COUNT unexpected receives */
     UCS_STATIC_ASSERT(IBV_DEVICE_MAX_UNEXP_COUNT);
-    *rx_cq_len = config->super.rx.queue_len + iface->tm.num_tags * 3  +
-                 config->super.rx.queue_len / IBV_DEVICE_MAX_UNEXP_COUNT;
-    *max_bcopy = ucs_max(config->tm.max_bcopy, config->super.super.max_bcopy);
+    init_attr->rx_cq_len = config->super.rx.queue_len + iface->tm.num_tags * 3 +
+                           config->super.rx.queue_len /
+                           IBV_DEVICE_MAX_UNEXP_COUNT;
+    init_attr->seg_size  = ucs_max(config->tm.max_bcopy,
+                                   config->super.super.max_bcopy);
     return;
 
 out_tm_disabled:
 #endif
-    *rx_cq_len = config->super.rx.queue_len;
-    *max_bcopy = config->super.super.max_bcopy;
+    init_attr->rx_cq_len = config->super.rx.queue_len;
+    init_attr->seg_size  = config->super.super.max_bcopy;
 }
 
 ucs_status_t uct_rc_iface_tag_init(uct_rc_iface_t *iface,
@@ -650,7 +654,7 @@ ucs_status_t uct_rc_iface_tag_init(uct_rc_iface_t *iface,
     srq_init_attr->base.srq_context    = iface;
     srq_init_attr->srq_type            = IBV_EXP_SRQT_TAG_MATCHING;
     srq_init_attr->pd                  = md->pd;
-    srq_init_attr->cq                  = iface->super.recv_cq;
+    srq_init_attr->cq                  = iface->super.cq[UCT_IB_DIR_RX];
     srq_init_attr->tm_cap.max_num_tags = iface->tm.num_tags;
 
     /* 2 ops for each tag (ADD + DEL) and extra ops for SYNC.
@@ -696,25 +700,21 @@ unsigned uct_rc_iface_do_progress(uct_iface_h tl_iface)
 
 UCS_CLASS_INIT_FUNC(uct_rc_iface_t, uct_rc_iface_ops_t *ops, uct_md_h md,
                     uct_worker_h worker, const uct_iface_params_t *params,
-                    const uct_rc_iface_config_t *config, unsigned rx_priv_len,
-                    unsigned fc_req_size, int tm_cap_flag,
-                    uint32_t res_domain_key)
+                    const uct_rc_iface_config_t *config,
+                    uct_ib_iface_init_attr_t *init_attr)
 {
     uct_ib_device_t *dev = &ucs_derived_of(md, uct_ib_md_t)->dev;
-    unsigned tx_cq_len   = config->tx.cq_len;
     struct ibv_srq_init_attr srq_init_attr;
     ucs_status_t status;
-    unsigned rx_cq_len;
-    size_t max_bcopy;
 
-    uct_rc_iface_preinit(self, md, config, params, tm_cap_flag, &rx_cq_len,
-                         &max_bcopy);
+    uct_rc_iface_preinit(self, md, config, params, init_attr);
+    init_attr->rx_hdr_len = sizeof(uct_rc_hdr_t);
+    init_attr->tx_cq_len  = config->tx.cq_len;
 
     UCS_CLASS_CALL_SUPER_INIT(uct_ib_iface_t, &ops->super, md, worker, params,
-                              rx_priv_len, sizeof(uct_rc_hdr_t), tx_cq_len,
-                              rx_cq_len, max_bcopy, res_domain_key, &config->super);
+                              &config->super, init_attr);
 
-    self->tx.cq_available           = tx_cq_len - 1;
+    self->tx.cq_available           = init_attr->tx_cq_len - 1;
     self->rx.srq.available          = 0;
     self->rx.srq.quota              = 0;
     self->config.tx_qp_len          = config->super.tx.queue_len;
@@ -722,7 +722,7 @@ UCS_CLASS_INIT_FUNC(uct_rc_iface_t, uct_rc_iface_ops_t *ops, uct_md_h md,
     self->config.tx_min_inline      = config->super.tx.min_inline;
     self->config.tx_moderation      = ucs_min(config->super.tx.cq_moderation,
                                               config->super.tx.queue_len / 4);
-    self->config.tx_ops_count       = tx_cq_len;
+    self->config.tx_ops_count       = init_attr->tx_cq_len;
     self->config.rx_inline          = config->super.rx.inl;
     self->config.min_rnr_timer      = uct_ib_to_fabric_time(config->tx.rnr_timeout);
     self->config.timeout            = uct_ib_to_fabric_time(config->tx.timeout);
@@ -733,7 +733,7 @@ UCS_CLASS_INIT_FUNC(uct_rc_iface_t, uct_rc_iface_ops_t *ops, uct_md_h md,
     self->config.max_rd_atomic      = config->max_rd_atomic;
     self->config.ooo_rw             = config->ooo_rw;
 #if ENABLE_ASSERT
-    self->config.tx_cq_len          = tx_cq_len;
+    self->config.tx_cq_len          = init_attr->tx_cq_len;
 #endif
 
     uct_rc_iface_set_path_mtu(self, config);
@@ -825,7 +825,7 @@ UCS_CLASS_INIT_FUNC(uct_rc_iface_t, uct_rc_iface_ops_t *ops, uct_md_h md,
         /* Create mempool for pending requests for FC grant */
         status = ucs_mpool_init(&self->tx.fc_mp,
                                 0,
-                                fc_req_size,
+                                init_attr->fc_req_size,
                                 0,
                                 1,
                                 128,
@@ -917,8 +917,8 @@ ucs_status_t uct_rc_iface_qp_create(uct_rc_iface_t *iface, int qp_type,
 
     memset(&qp_init_attr, 0, sizeof(qp_init_attr));
     qp_init_attr.qp_context          = NULL;
-    qp_init_attr.send_cq             = iface->super.send_cq;
-    qp_init_attr.recv_cq             = iface->super.recv_cq;
+    qp_init_attr.send_cq             = iface->super.cq[UCT_IB_DIR_TX];
+    qp_init_attr.recv_cq             = iface->super.cq[UCT_IB_DIR_RX];
     if (qp_type == IBV_QPT_RC) {
         qp_init_attr.srq             = iface->rx.srq.srq;
     }
@@ -932,7 +932,7 @@ ucs_status_t uct_rc_iface_qp_create(uct_rc_iface_t *iface, int qp_type,
 
 #if HAVE_DECL_IBV_EXP_CREATE_QP
     qp_init_attr.comp_mask           = IBV_EXP_QP_INIT_ATTR_PD;
-    qp_init_attr.pd                  = uct_ib_iface_md(&iface->super)->pd;
+    qp_init_attr.pd                  = uct_ib_iface_qp_pd(&iface->super);
 
 #  if HAVE_IB_EXT_ATOMICS
     qp_init_attr.comp_mask          |= IBV_EXP_QP_INIT_ATTR_ATOMICS_ARG;
@@ -960,10 +960,10 @@ ucs_status_t uct_rc_iface_qp_create(uct_rc_iface_t *iface, int qp_type,
 
     qp = ibv_exp_create_qp(dev->ibv_context, &qp_init_attr);
 #else
-    qp = ibv_create_qp(uct_ib_iface_md(&iface->super)->pd, &qp_init_attr);
+    qp = ibv_create_qp(uct_ib_iface_qp_pd(&iface->super), &qp_init_attr);
 #endif
     if (qp == NULL) {
-        ucs_error("failed to create qp: %m");
+        ucs_error("failed to create %s qp type: %m", qp_type_str);
         return UCS_ERR_IO_ERROR;
     }
 
@@ -1102,7 +1102,7 @@ ucs_status_t uct_rc_iface_common_event_arm(uct_iface_h tl_iface,
     }
 
     if (events & UCT_EVENT_SEND_COMP) {
-        status = iface->super.ops->arm_tx_cq(&iface->super);
+        status = iface->super.ops->arm_cq(&iface->super, UCT_IB_DIR_TX, 0);
         if (status != UCS_OK) {
             return status;
         }
@@ -1119,8 +1119,8 @@ ucs_status_t uct_rc_iface_common_event_arm(uct_iface_h tl_iface,
     }
 
     if (arm_rx_solicited || arm_rx_all) {
-        status = iface->super.ops->arm_rx_cq(&iface->super,
-                                             arm_rx_solicited && !arm_rx_all);
+        status = iface->super.ops->arm_cq(&iface->super, UCT_IB_DIR_RX,
+                                          arm_rx_solicited && !arm_rx_all);
         if (status != UCS_OK) {
             return status;
         }

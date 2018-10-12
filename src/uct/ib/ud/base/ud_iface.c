@@ -258,8 +258,8 @@ uct_ud_iface_create_qp(uct_ud_iface_t *self, const uct_ud_iface_config_t *config
     /* Create QP */
     memset(&qp_init_attr, 0, sizeof(qp_init_attr));
     qp_init_attr.qp_context          = NULL;
-    qp_init_attr.send_cq             = self->super.send_cq;
-    qp_init_attr.recv_cq             = self->super.recv_cq;
+    qp_init_attr.send_cq             = self->super.cq[UCT_IB_DIR_TX];
+    qp_init_attr.recv_cq             = self->super.cq[UCT_IB_DIR_RX];
     qp_init_attr.srq                 = NULL; /* TODO */
     qp_init_attr.qp_type             = IBV_QPT_UD;
     qp_init_attr.sq_sig_all          = 0;
@@ -273,7 +273,7 @@ uct_ud_iface_create_qp(uct_ud_iface_t *self, const uct_ud_iface_config_t *config
                                                UCT_UD_MIN_INLINE);
 
 #if HAVE_VERBS_EXP_H
-    qp_init_attr.pd                  = uct_ib_iface_md(&self->super)->pd;
+    qp_init_attr.pd                  = uct_ib_iface_qp_pd(&self->super);
     qp_init_attr.comp_mask           = IBV_QP_INIT_ATTR_PD;
 #if HAVE_IBV_EXP_RES_DOMAIN
     if (self->super.res_domain != NULL) {
@@ -292,7 +292,7 @@ uct_ud_iface_create_qp(uct_ud_iface_t *self, const uct_ud_iface_config_t *config
     self->qp = ibv_exp_create_qp(uct_ib_iface_device(&self->super)->ibv_context,
                                  &qp_init_attr);
 #else
-    self->qp = ibv_exp_create_qp(uct_ib_iface_md(&self->super)->pd, &qp_init_attr);
+    self->qp = ibv_exp_create_qp(uct_ib_iface_qp_pd(&self->super), &qp_init_attr);
 #endif
     if (self->qp == NULL) {
         ucs_error("Failed to create qp: %s [inline: %u rsge: %u ssge: %u rwr: %u swr: %u]",
@@ -427,17 +427,16 @@ static void uct_ud_iface_calc_gid_len(uct_ud_iface_t *iface)
 
 UCS_CLASS_INIT_FUNC(uct_ud_iface_t, uct_ud_iface_ops_t *ops, uct_md_h md,
                     uct_worker_h worker, const uct_iface_params_t *params,
-                    unsigned ud_rx_priv_len, uint32_t res_domain_key,
-                    const uct_ud_iface_config_t *config)
+                    const uct_ud_iface_config_t *config,
+                    uct_ib_iface_init_attr_t *init_attr)
 {
-    unsigned rx_priv_len, rx_hdr_len;
     ucs_status_t status;
     size_t data_size;
     int mtu;
 
-    ucs_trace_func("%s: iface=%p ops=%p worker=%p rx_headroom=%zu ud_rx_priv_len=%u",
+    ucs_trace_func("%s: iface=%p ops=%p worker=%p rx_headroom=%zu",
                    params->mode.device.dev_name, self, ops, worker,
-                   params->rx_headroom, ud_rx_priv_len);
+                   params->rx_headroom);
 
     if (config->super.tx.queue_len <= UCT_UD_TX_MODERATION) {
         ucs_error("%s ud iface tx queue is too short (%d <= %d)",
@@ -451,16 +450,15 @@ UCS_CLASS_INIT_FUNC(uct_ud_iface_t, uct_ud_iface_ops_t *ops, uct_md_h md,
         return status;
     }
 
-    rx_priv_len = ud_rx_priv_len +
-                  sizeof(uct_ud_recv_skb_t) - sizeof(uct_ib_iface_recv_desc_t);
-    rx_hdr_len  = UCT_IB_GRH_LEN + sizeof(uct_ud_neth_t);
+    init_attr->rx_priv_len = sizeof(uct_ud_recv_skb_t) -
+                             sizeof(uct_ib_iface_recv_desc_t);
+    init_attr->rx_hdr_len  = UCT_IB_GRH_LEN + sizeof(uct_ud_neth_t);
+    init_attr->tx_cq_len   = config->super.tx.queue_len;
+    init_attr->rx_cq_len   = config->super.rx.queue_len;
+    init_attr->seg_size    = ucs_min(mtu, config->super.super.max_bcopy);
 
     UCS_CLASS_CALL_SUPER_INIT(uct_ib_iface_t, &ops->super, md, worker,
-                              params, rx_priv_len, rx_hdr_len,
-                              config->super.tx.queue_len,
-                              config->super.rx.queue_len,
-                              ucs_min(mtu, config->super.super.max_bcopy),
-                              res_domain_key, &config->super);
+                              params, &config->super, init_attr);
 
     if (self->super.super.worker->async == NULL) {
         ucs_error("%s ud iface must have valid async context", params->mode.device.dev_name);
@@ -927,7 +925,7 @@ ucs_status_t uct_ud_iface_event_arm(uct_iface_h tl_iface, unsigned events)
     }
 
     if (events & UCT_EVENT_SEND_COMP) {
-        status = iface->super.ops->arm_tx_cq(&iface->super);
+        status = iface->super.ops->arm_cq(&iface->super, UCT_IB_DIR_TX, 0);
         if (status != UCS_OK) {
             goto out;
         }
@@ -935,7 +933,7 @@ ucs_status_t uct_ud_iface_event_arm(uct_iface_h tl_iface, unsigned events)
 
     if (events & (UCT_EVENT_SEND_COMP | UCT_EVENT_RECV)) {
         /* we may get send completion through ACKs as well */
-        status = iface->super.ops->arm_rx_cq(&iface->super, 0);
+        status = iface->super.ops->arm_cq(&iface->super, UCT_IB_DIR_RX, 0);
         if (status != UCS_OK) {
             goto out;
         }

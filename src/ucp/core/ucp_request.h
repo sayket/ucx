@@ -18,6 +18,7 @@
 #include <ucs/datastruct/mpool.h>
 #include <ucs/datastruct/queue_types.h>
 #include <ucp/dt/dt.h>
+#include <ucp/rma/rma.h>
 #include <ucp/wireup/wireup.h>
 
 
@@ -108,9 +109,12 @@ struct ucp_request {
     uint16_t                      flags;   /* Request flags */
 
     union {
+
+        /* "send" part - used for tag_send, stream_send,  put, get, and atomic
+         * operations */
         struct {
             ucp_ep_h              ep;
-            const void            *buffer;  /* Send buffer */
+            void                  *buffer;  /* Send buffer */
             ucp_datatype_t        datatype; /* Send type */
             size_t                length;   /* Total length, in bytes */
             uct_memory_type_t     mem_type; /* Memory type */
@@ -172,10 +176,14 @@ struct ucp_request {
 
                 struct {
                     ucp_request_callback_t flushed_cb;/* Called when flushed */
+                    ucs_queue_elem_t       queue;     /* Queue element in proto_status */
+                    unsigned               uct_flags; /* Flags to pass to @ref uct_ep_flush */
                     uct_worker_cb_id_t     prog_id;   /* Progress callback ID */
+                    uint32_t               cmpl_sn;   /* Sequence number of the remote completion
+                                                         this request is waiting for */
+                    uint8_t                sw_started;
+                    uint8_t                sw_done;
                     ucp_lane_map_t         lanes;     /* Which lanes need to be flushed */
-                    unsigned               uct_flags; /* Flags to pass to
-                                                            @ref uct_ep_flush */
                 } flush;
 
                 struct {
@@ -184,11 +192,9 @@ struct ucp_request {
 
                 struct {
                     uint64_t              remote_addr; /* Remote address */
-                    uct_atomic_op_t       uct_op;      /* Requested UCT AMO */
                     ucp_rkey_h            rkey;        /* Remote memory key */
-                    uint64_t              value;
-                    size_t                size;
-                    void                  *result;
+                    uint64_t              value;       /* Atomic argument */
+                    uct_atomic_op_t       uct_op;      /* Requested UCT AMO */
                 } amo;
 
                 struct {
@@ -204,6 +210,15 @@ struct ucp_request {
                                              of a large message */
                     unsigned flags;
                 } am;
+                
+                struct {
+                    uintptr_t              req;  /* Remote get request pointer */
+                } get_reply;
+
+                struct {
+                    uintptr_t              req;  /* Remote atomic request pointer */
+                    ucp_atomic_reply_t     data; /* Atomic reply data */
+                } atomic_reply;
             };
 
             /* This structure holds all mutable fields, and everything else
@@ -222,6 +237,7 @@ struct ucp_request {
             ucp_mem_desc_t        *mdesc;
         } send;
 
+        /* "receive" part - used for tag_recv and stream_recv operations */
         struct {
             ucs_queue_elem_t      queue;    /* Expected queue element */
             void                  *buffer;  /* Buffer to receive data to */
@@ -305,7 +321,7 @@ int ucp_request_pending_add(ucp_request_t *req, ucs_status_t *req_status);
 ucs_status_t ucp_request_memory_reg(ucp_context_t *context, ucp_md_map_t md_map,
                                     void *buffer, size_t length, ucp_datatype_t datatype,
                                     ucp_dt_state_t *state, uct_memory_type_t mem_type,
-                                    ucp_request_t *req_dbg);
+                                    ucp_request_t *req_dbg, unsigned uct_flags);
 
 void ucp_request_memory_dereg(ucp_context_t *context, ucp_datatype_t datatype,
                               ucp_dt_state_t *state, ucp_request_t *req_dbg);

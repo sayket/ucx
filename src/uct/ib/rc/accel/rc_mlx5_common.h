@@ -7,6 +7,7 @@
 #ifndef UCT_RC_MLX5_COMMON_H
 #define UCT_RC_MLX5_COMMON_H
 
+#include <uct/ib/base/ib_device.h>
 #include <uct/ib/rc/base/rc_iface.h>
 #include <uct/ib/rc/base/rc_ep.h>
 #include <uct/ib/mlx5/ib_mlx5.h>
@@ -197,14 +198,13 @@ typedef struct uct_common_mlx5_iface_config {
 
 typedef struct uct_rc_mlx5_iface_common {
     struct {
-        uct_ib_mlx5_cq_t          cq;
         ucs_mpool_t               atomic_desc_mp;
     } tx;
     struct {
-        uct_ib_mlx5_cq_t          cq;
         uct_ib_mlx5_srq_t         srq;
         void                      *pref_ptr;
     } rx;
+    uct_ib_mlx5_cq_t              cq[UCT_IB_DIR_NUM];
 #if IBV_EXP_HW_TM
     struct {
         uct_rc_mlx5_cmd_wq_t      cmd_wq;
@@ -228,6 +228,7 @@ typedef struct uct_rc_mlx5_iface_common {
     UCS_STATS_NODE_DECLARE(stats);
 } uct_rc_mlx5_iface_common_t;
 
+
 extern ucs_config_field_t uct_mlx5_common_config_table[];
 
 unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_iface_t *iface, uct_ib_mlx5_srq_t *srq);
@@ -250,8 +251,8 @@ void uct_rc_mlx5_iface_common_update_cqs_ci(uct_rc_mlx5_iface_common_t *iface,
 void uct_rc_mlx5_iface_common_sync_cqs_ci(uct_rc_mlx5_iface_common_t *iface,
                                           uct_ib_iface_t *ib_iface);
 
-void uct_rc_mlx5_iface_commom_clean_srq(uct_rc_mlx5_iface_common_t *mlx5_common_iface,
-                                        uct_rc_iface_t *rc_iface, uint32_t qpn);
+int uct_rc_mlx5_iface_commom_clean(uct_ib_mlx5_cq_t *mlx5_cq,
+                                   uct_ib_mlx5_srq_t *srq, uint32_t qpn);
 
 ucs_status_t
 uct_rc_mlx5_iface_common_tag_init(uct_rc_mlx5_iface_common_t *iface,
@@ -371,7 +372,7 @@ uct_rc_mlx5_iface_check_rx_completion(uct_rc_mlx5_iface_common_t *mlx5_common_if
                                       uct_rc_iface_t *rc_iface,
                                       struct mlx5_cqe64 *cqe)
 {
-    uct_ib_mlx5_cq_t *cq      = &mlx5_common_iface->rx.cq;
+    uct_ib_mlx5_cq_t *cq      = &mlx5_common_iface->cq[UCT_IB_DIR_RX];
     struct mlx5_err_cqe *ecqe = (void*)cqe;
     uct_ib_mlx5_srq_seg_t *seg;
     uint16_t wqe_ctr;
@@ -399,7 +400,7 @@ static UCS_F_ALWAYS_INLINE struct mlx5_cqe64*
 uct_rc_mlx5_iface_poll_rx_cq(uct_rc_mlx5_iface_common_t *mlx5_common_iface,
                              uct_rc_iface_t *rc_iface)
 {
-    uct_ib_mlx5_cq_t *cq = &mlx5_common_iface->rx.cq;
+    uct_ib_mlx5_cq_t *cq = &mlx5_common_iface->cq[UCT_IB_DIR_RX];
     struct mlx5_cqe64 *cqe;
     unsigned index;
     uint8_t op_own;
@@ -519,9 +520,11 @@ uct_rc_mlx5_common_post_send(uct_rc_iface_t *iface, enum ibv_qp_type qp_type,
                                  txqp->qp->qp_num, fm_ce_se, wqe_size);
     }
 
+#if HAVE_TL_DC
     if (qp_type == IBV_EXP_QPT_DC_INI) {
         uct_ib_mlx5_set_dgram_seg((void*)(ctrl + 1), av, grh_av, qp_type);
     }
+#endif
 
     uct_ib_mlx5_log_tx(&iface->super, qp_type, ctrl, txwq->qstart,
                        txwq->qend, max_log_sge, log_sge,
@@ -1412,6 +1415,7 @@ uct_rc_mlx5_iface_common_copy_to_dm(uct_rc_mlx5_dm_copy_data_t *cache, size_t hd
     uint64_t *dst    = dm;
     uint64_t padding = 0; /* init by 0 to suppress valgrind error */
     int i            = 0;
+    typedef uint64_t misaligned_uint64_t UCS_V_ALIGNED(1);
 
     ucs_assert(sizeof(*cache) >= hdr_len);
     ucs_assert(head + body + tail == length);
@@ -1443,7 +1447,7 @@ uct_rc_mlx5_iface_common_copy_to_dm(uct_rc_mlx5_dm_copy_data_t *cache, size_t hd
     log_sge->num_sge = i;
 
     /* copy payload to DM */
-    UCS_WORD_COPY(dst, payload + head, uint64_t, body);
+    UCS_WORD_COPY(uint64_t, dst, misaligned_uint64_t, payload + head, body);
     if (tail) {
         memcpy(&padding, payload + head + body, tail);
         *(dst + (body / sizeof(uint64_t))) = padding;
