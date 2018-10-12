@@ -13,8 +13,14 @@ typedef struct{
                               * but we want to keep this struct at 64 bits
                               * to fit in uct_ep_am_short header. MAX_SHORT
                               * should be much smaller than this anyway */
-    uint32_t     am_id;      /* Index into callback array */
+    uint16_t     am_id;      /* Index into callback array */
+    uint16_t     flags;      /* flags that indicate if there is a reply */
 } UCS_S_PACKED ucp_am_hdr_t;
+
+typedef struct{
+    ucp_am_hdr_t super;
+    uintptr_t    ep_ptr;
+} UCS_S_PACKED ucp_am_reply_hdr_t;
 
 typedef struct{
     size_t            total_size; /* length of buffer needed for all data */
@@ -24,6 +30,8 @@ typedef struct{
                                      of arrivals */
     size_t            offset;     /* how far this message goes into large
                                      the entire AM buffer */
+    uintptr_t         ep_ptr;     /* pointer for sending ack */
+    unsigned          flags;
 } UCS_S_PACKED ucp_am_long_hdr_t;
 
 typedef struct{

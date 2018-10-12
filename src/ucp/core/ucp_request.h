@@ -75,10 +75,11 @@ enum {
     UCP_RECV_DESC_FLAG_MALLOC         = UCS_BIT(6), /* Descriptor was allocated with malloc 
                                                        and must be freed, not returned to the
                                                        memory pool */
-    UCP_RECV_DESC_FLAG_HDR            = UCS_BIT(7)  /* Descriptor was orignally allocated by
+    UCP_RECV_DESC_FLAG_HDR            = UCS_BIT(7), /* Descriptor was orignally allocated by
                                                        uct and the ucp level am header must
                                                        be accounted for when releasing 
                                                        descriptors */
+    UCP_RECV_DESC_FLAG_REPLY          = UCS_BIT(8)  /* AM that needed a reply */
 };
 
 
@@ -201,6 +202,7 @@ struct ucp_request {
                     uint16_t am_id;
                     uint64_t message_id;  /* used to identify matching parts
                                              of a large message */
+                    unsigned flags;
                 } am;
             };
 

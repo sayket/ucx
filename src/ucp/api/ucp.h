@@ -196,6 +196,9 @@ enum ucp_am_cb_flags {
     UCP_AM_FLAG_WHOLE_MSG = UCS_BIT(0)
 };
 
+enum ucp_send_am_flags {
+    UCP_AM_SEND_REPLY = UCS_BIT(0)
+};
 /**
  * @ingroup UCP_ENDPOINT
  * @brief UCP endpoint parameters field mask.

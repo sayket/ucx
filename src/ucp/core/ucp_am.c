@@ -36,15 +36,20 @@ void ucp_am_ep_cleanup(ucp_ep_h ep)
 void ucp_am_data_release(ucp_worker_h worker, void *data)
 {
     ucp_recv_desc_t *rdesc = (ucp_recv_desc_t *) data - 1;
+    ucp_recv_desc_t *desc;
 
     if (rdesc->flags & UCP_RECV_DESC_FLAG_MALLOC) {
         ucs_free(rdesc);
         return;
     } else if (rdesc->flags & UCP_RECV_DESC_FLAG_HDR) {
-        ucp_recv_desc_t *desc = rdesc;
+        desc = rdesc;
         rdesc = UCS_PTR_BYTE_OFFSET(rdesc, -sizeof(ucp_am_hdr_t));
         *rdesc = *desc;
-    }
+    } else if (rdesc->flags & UCP_RECV_DESC_FLAG_REPLY) {
+        desc = rdesc;
+        rdesc = UCS_PTR_BYTE_OFFSET(rdesc, -sizeof(ucp_am_reply_hdr_t));
+        *rdesc = *desc;
+    } 
     ucp_recv_desc_release(rdesc);
 }
 
@@ -73,28 +78,41 @@ ucs_status_t ucp_worker_set_am_handler(ucp_worker_h worker, uint16_t id,
 
 size_t bcopy_pack_args_single(void *dest, void *arg)
 {
+    ucp_am_reply_hdr_t *reply_hdr = dest;
     ucp_am_hdr_t *hdr = dest;
     ucp_request_t *req = arg;
     size_t length;
+    size_t hdr_size;
 
     ucs_assert(req->send.state.dt.offset == 0);
-
+    
     hdr->am_id = req->send.am.am_id;
     hdr->total_size = req->send.length;
+    hdr->flags = req->send.am.flags;
 
-    length = ucp_dt_pack(req->send.ep->worker, req->send.datatype,
-                         UCT_MD_MEM_TYPE_HOST, hdr + 1, req->send.buffer,
-                         &req->send.state.dt, req->send.length);
+    if (req->send.am.flags & UCP_AM_SEND_REPLY) {
+        reply_hdr->ep_ptr = ucp_request_get_dest_ep_ptr(req);
+
+        length = ucp_dt_pack(req->send.ep->worker, req->send.datatype,
+                             UCT_MD_MEM_TYPE_HOST, reply_hdr + 1, 
+                             req->send.buffer,
+                             &req->send.state.dt, req->send.length);
+        hdr_size = sizeof(*reply_hdr);
+    } else {
+        length = ucp_dt_pack(req->send.ep->worker, req->send.datatype,
+                             UCT_MD_MEM_TYPE_HOST, hdr + 1, req->send.buffer,
+                             &req->send.state.dt, req->send.length);
+        hdr_size = sizeof(*hdr);
+    }
     ucs_assert(length == req->send.length);
 
-    return sizeof(ucp_am_hdr_t) + length;
+    return hdr_size + length;
 }
 
 size_t bcopy_pack_args_first(void *dest, void *arg){
     ucp_am_long_hdr_t *hdr = dest;
     ucp_request_t *req = arg;
     size_t length;
-
     length = ucp_ep_get_max_bcopy(req->send.ep, req->send.lane) -
                                   sizeof(*hdr);
     hdr->total_size = req->send.length;
@@ -102,6 +120,7 @@ size_t bcopy_pack_args_first(void *dest, void *arg){
     hdr->msg_id     = req->send.tag.message_id;
     hdr->ep         = ucp_request_get_dest_ep_ptr(req);
     hdr->offset     = req->send.state.dt.offset;
+    hdr->flags      = req->send.am.flags;
     return sizeof(*hdr) + ucp_dt_pack(req->send.ep->worker, 
                                       req->send.datatype, 
                                       UCT_MD_MEM_TYPE_HOST,
@@ -125,6 +144,7 @@ size_t bcopy_pack_args_mid(void *dest, void *arg)
     hdr->ep         = ucp_request_get_dest_ep_ptr(req);
     hdr->am_id      = req->send.am.am_id;
     hdr->total_size = req->send.length;
+    hdr->flags      = req->send.am.flags;
     return sizeof(*hdr) + ucp_dt_pack(req->send.ep->worker,
                                       req->send.datatype,
                                       UCT_MD_MEM_TYPE_HOST,
@@ -142,7 +162,7 @@ ucs_status_t ucp_am_send_short(ucp_ep_h ep, uint16_t id,
 
     hdr.am_id = id;
     hdr.total_size = length;
-
+    hdr.flags = 0;
     ucs_assert(sizeof(ucp_am_hdr_t) == sizeof(uint64_t));
 
     buf = (void *) payload;
@@ -200,25 +220,35 @@ static ucs_status_t ucp_am_bcopy_multi(uct_pending_req_t *self)
 static ucs_status_t ucp_am_zcopy_single(uct_pending_req_t *self)
 {
     ucp_request_t *req = ucs_container_of(self, ucp_request_t, send.uct);
-    ucp_am_hdr_t   hdr;
-
-    hdr.am_id = req->send.am.am_id;
-    hdr.total_size = req->send.length;
-    
-    return ucp_do_am_zcopy_single(self, UCP_AM_ID_SINGLE, &hdr,
-                                  sizeof(hdr), ucp_proto_am_zcopy_req_complete);
+    ucp_am_reply_hdr_t   reply_hdr;
+    ucp_am_hdr_t         hdr;
+    if (req->send.am.flags & UCP_AM_SEND_REPLY) {
+        reply_hdr.super.am_id = req->send.am.am_id;
+        reply_hdr.super.total_size = req->send.length;
+        reply_hdr.super.flags = req->send.am.flags;
+        reply_hdr.ep_ptr = ucp_request_get_dest_ep_ptr(req);
+        return ucp_do_am_zcopy_single(self, UCP_AM_ID_SINGLE, 
+                                      &reply_hdr, sizeof(reply_hdr), 
+                                      ucp_proto_am_zcopy_req_complete);
+    } else {
+        hdr.am_id = req->send.am.am_id;
+        hdr.total_size = req->send.length;
+        hdr.flags = req->send.am.flags;
+        return ucp_do_am_zcopy_single(self, UCP_AM_ID_SINGLE, &hdr,
+                                      sizeof(hdr), ucp_proto_am_zcopy_req_complete);
+    }
 }
 
 static ucs_status_t ucp_am_zcopy_multi(uct_pending_req_t *self)
 {
     ucp_request_t *req = ucs_container_of(self, ucp_request_t, send.uct);
     ucp_am_long_hdr_t hdr;
-
     hdr.ep         = ucp_request_get_dest_ep_ptr(req);
     hdr.msg_id     = req->send.tag.message_id;
     hdr.offset     = req->send.state.dt.offset;
     hdr.am_id      = req->send.am.am_id;
     hdr.total_size = req->send.length;
+    hdr.flags      = req->send.am.flags;
     return ucp_do_am_zcopy_multi(self, UCP_AM_ID_MULTI, UCP_AM_ID_MULTI,
                                  &hdr, sizeof(hdr),
                                  &hdr, sizeof(hdr),
@@ -230,9 +260,10 @@ static void ucp_am_send_req_init(ucp_request_t *req, ucp_ep_h ep,
                                  size_t count, uint16_t flags, 
                                  uint16_t am_id)
 {
-    req->flags = flags;
+    req->flags = 0;
     req->send.ep = ep;
     req->send.am.am_id = am_id;
+    req->send.am.flags = flags;
     req->send.buffer = buffer;
     req->send.datatype = datatype;
     req->send.mem_type = UCT_MD_MEM_TYPE_HOST;
@@ -249,10 +280,18 @@ ucp_am_send_req(ucp_request_t *req, size_t count,
                 const ucp_ep_msg_config_t * msg_config,
                 ucp_send_callback_t cb, const ucp_proto_t *proto)
 {
+    size_t max_short;
     size_t zcopy_thresh = ucp_proto_get_zcopy_threshold(req, msg_config,
                                                         count, SIZE_MAX);
-    ssize_t max_short   = ucp_proto_get_short_max(req, msg_config);
     
+    /* if we need a reply, we cannot send using short b/c the header
+     * is too big */
+    if (req->send.am.flags & UCP_AM_SEND_REPLY) {
+        max_short = -1;
+    } else {
+        max_short   = ucp_proto_get_short_max(req, msg_config);
+    }
+
     ucs_status_t status = ucp_request_send_start(req, max_short, 
                                                  zcopy_thresh, SIZE_MAX,
                                                  count, msg_config,
@@ -265,6 +304,7 @@ ucp_am_send_req(ucp_request_t *req, size_t count,
      * If it is completed immediately, release the request and return the status.
      * Otherwise, return the request.
      */
+
     status = ucp_request_send(req);
     if (req->flags & UCP_REQUEST_FLAG_COMPLETED) {
         ucs_trace_req("releasing send request %p, returning status %s", req,
@@ -274,7 +314,6 @@ ucp_am_send_req(ucp_request_t *req, size_t count,
     }
 
     ucp_request_set_callback(req, send.cb, cb);
-    ucs_trace_req("returning send request %p", req);
     
     return req + 1;
 }
@@ -288,8 +327,8 @@ ucs_status_ptr_t ucp_am_send_nb(ucp_ep_h ep, uint16_t id,
     ucs_status_ptr_t ret;
     ucp_request_t *req;
     size_t length;
-
-    if (ucs_unlikely(flags != 0)) {
+    
+    if (ucs_unlikely((flags != 0) && !(flags & UCP_AM_SEND_REPLY))) {
         return UCS_STATUS_PTR(UCS_ERR_NOT_IMPLEMENTED);
     }
 
@@ -300,8 +339,10 @@ ucs_status_ptr_t ucp_am_send_nb(ucp_ep_h ep, uint16_t id,
         ret = UCS_STATUS_PTR(status);
         goto out;
     }
-    if (ucs_likely(UCP_DT_IS_CONTIG(datatype))) {
+    if (!(flags & UCP_AM_SEND_REPLY) && 
+        (ucs_likely(UCP_DT_IS_CONTIG(datatype)))) {
         length = ucp_contig_dt_length(datatype, count);
+        
         if (ucs_likely((ssize_t)length <= ucp_ep_config(ep)->am.max_short)) {
             status = ucp_am_send_short(ep, id, payload, length);
             if (ucs_likely(status != UCS_ERR_NO_RESOURCE)) {
@@ -311,6 +352,7 @@ ucs_status_ptr_t ucp_am_send_nb(ucp_ep_h ep, uint16_t id,
             }
         }
     }
+    
     req = ucp_request_get(ep->worker);
     if (ucs_unlikely(req == NULL)) {
         ret = UCS_STATUS_PTR(UCS_ERR_NO_MEMORY);
@@ -337,6 +379,9 @@ ucp_am_handler(void *am_arg, void *am_data, size_t am_length,
     uint16_t recv_flags = 0;
     uint16_t am_id      = hdr->am_id;
     ucs_status_t status;
+    ucp_am_reply_hdr_t *reply_hdr;
+    ucp_ep_h reply_ep;
+    size_t hdr_size;
 
     if (worker->am_cbs[hdr->am_id].cb == NULL) {
         ucs_warn("UCP Active Message was received with id : %u, but there" 
@@ -344,17 +389,35 @@ ucp_am_handler(void *am_arg, void *am_data, size_t am_length,
         return UCS_OK;
     }
 
-    if (am_flags & UCT_CB_PARAM_FLAG_DESC) {
+    if ((am_flags & UCT_CB_PARAM_FLAG_DESC) && 
+        !(hdr->flags & UCP_AM_SEND_REPLY)) {
         recv_flags |= UCP_RECV_DESC_FLAG_HDR;
+    } else if ((am_flags & UCT_CB_PARAM_FLAG_DESC) && 
+               (hdr->flags & UCP_AM_SEND_REPLY)) {
+        recv_flags |= UCP_RECV_DESC_FLAG_REPLY;
     }
     
-    status = ucp_recv_desc_init(worker, hdr + 1, am_length,
-                                0, am_flags, 0,
-                                recv_flags, 0, &desc);
-    
+
+    if (hdr->flags & UCP_AM_SEND_REPLY) {
+        reply_hdr = (ucp_am_reply_hdr_t *) hdr;
+        reply_ep = ucp_worker_get_ep_by_ptr(worker, reply_hdr->ep_ptr);
+        status = ucp_recv_desc_init(worker, reply_hdr + 1, am_length,
+                                    0, am_flags, 0,
+                                    recv_flags, 0, &desc);
+        hdr_size = sizeof(*reply_hdr);
+    } else {
+        reply_ep = NULL;
+        status = ucp_recv_desc_init(worker, hdr + 1, am_length,
+                                    0, am_flags, 0,
+                                    recv_flags, 0, &desc);
+        hdr_size = sizeof(*hdr);
+    }
+
+
     status = (worker->am_cbs[am_id].cb)(worker->am_cbs[am_id].context,
                                         desc + 1, 
-                                        am_length - sizeof(*hdr),
+                                        am_length - hdr_size,
+                                        reply_ep,
                                         UCP_CB_PARAM_FLAG_DATA);
     
     if ((status == UCS_INPROGRESS) && (am_flags & UCT_CB_PARAM_FLAG_DESC)) {
@@ -369,9 +432,12 @@ ucp_am_handler(void *am_arg, void *am_data, size_t am_length,
 }
 
 static ucs_status_t
-ucp_am_find_parent(ucp_worker_h worker, ucp_ep_ext_proto_t *ep_ext, 
-                   ucp_am_long_hdr_t *hdr, size_t am_length, uint16_t am_id)
+ucp_am_find_parent(ucp_worker_h worker, ucp_ep_h ep, 
+                   ucp_ep_ext_proto_t *ep_ext, 
+                   ucp_am_long_hdr_t *hdr, size_t am_length)
 {
+    uint16_t am_id;
+    ucp_ep_h reply_ep;
     ucp_am_unfinished_t *parent_am;
     ucs_status_t status;
     
@@ -382,11 +448,17 @@ ucp_am_find_parent(ucp_worker_h worker, ucp_ep_ext_proto_t *ep_ext,
             parent_am->left -= am_length - sizeof(*hdr);
             /* If this is the last callback, we run it and cleanup */
             if (parent_am->left == 0) {
+                if (hdr->flags & UCP_AM_SEND_REPLY) {
+                    reply_ep = ep;
+                }
+                else {
+                    reply_ep = NULL;
+                }
                 am_id = hdr->am_id;
-
                 status = worker->am_cbs[am_id].cb(worker->am_cbs[am_id].context,
                                                   parent_am->all_data + 1,
                                                   hdr->total_size,
+                                                  reply_ep,
                                                   UCP_CB_PARAM_FLAG_DATA);
 
                 if (status != UCS_INPROGRESS) {
@@ -426,7 +498,7 @@ ucp_am_long_handler(void *am_arg, void *am_data, size_t am_length,
      * have arrived. If any messages have arrived,
      * we copy ourselves into the buffer and leave
      */
-    status = ucp_am_find_parent(worker, ep_ext, long_hdr, am_length, long_hdr->am_id);
+    status = ucp_am_find_parent(worker, ep, ep_ext, long_hdr, am_length);
     
     if (status == UCS_OK) {
         goto out;
@@ -446,9 +518,8 @@ ucp_am_long_handler(void *am_arg, void *am_data, size_t am_length,
     
     memcpy(UCS_PTR_BYTE_OFFSET(all_data + 1, long_hdr->offset),
            long_hdr + 1, am_length - sizeof(ucp_am_long_hdr_t));
-
+    
     /* Can't use a desc for this because of the buffer */
-
     unfinished              = ucs_malloc(sizeof(ucp_am_unfinished_t),
                                          "unfinished UCP AM");
     unfinished->all_data    = all_data;

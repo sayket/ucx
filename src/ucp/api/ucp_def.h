@@ -87,16 +87,19 @@ typedef struct ucp_ep                    *ucp_ep_h;
  *
  * When the callback is called, @a flags indicates how @a data should be handled.
  *  
- * @param [in]  arg     User-defined argument.
- * @param [in]  data    Points to the received data. This data may
- *                      persist after the callback returns and need
- *                      to be freed with @ref ucp_am_data_release
- * @param [in]  length  Length of data.
- * @param [in]  flags   If this flag is set to UCP_CB_PARAM_FLAG_DATA,
- *                      the callback can return UCS_INPROGRESS and
- *                      data will persist after the callback returns
+ * @param [in]  arg      User-defined argument.
+ * @param [in]  data     Points to the received data. This data may
+ *                       persist after the callback returns and need
+ *                       to be freed with @ref ucp_am_data_release
+ * @param [in]  length   Length of data.
+ * @param [in]  reply_ep If the active message is sent with the 
+ *                       UCP_AM_SEND_REPLY flag, the sending ep
+ *                       will be passed in. If not, NULL will be passed
+ * @param [in]  flags    If this flag is set to UCP_CB_PARAM_FLAG_DATA,
+ *                       the callback can return UCS_INPROGRESS and
+ *                       data will persist after the callback returns
  *
- * @return UCS_OK       @a data will not persist after the callback returns
+ * @return UCS_OK        @a data will not persist after the callback returns
  *                      
  * @return UCS_INPROGRESS Can only be returned if flags is set to
  *                        UCP_CB_PARAM_FLAG_DATA. If UCP_INPROGRESS
@@ -110,7 +113,7 @@ typedef struct ucp_ep                    *ucp_ep_h;
  *
  */
 typedef ucs_status_t (*ucp_am_callback_t)(void *arg, void *data, size_t length,
-                                          unsigned flags);
+                                          ucp_ep_h reply_ep, unsigned flags);
 
 
 /**
