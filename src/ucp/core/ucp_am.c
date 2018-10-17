@@ -264,7 +264,7 @@ static void ucp_am_send_req_init(ucp_request_t *req, ucp_ep_h ep,
     req->send.ep = ep;
     req->send.am.am_id = am_id;
     req->send.am.flags = flags;
-    req->send.buffer = buffer;
+    req->send.buffer = (void *)buffer;
     req->send.datatype = datatype;
     req->send.mem_type = UCT_MD_MEM_TYPE_HOST;
     req->send.lane = ep->am_lane;
